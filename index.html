@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Giải mã và kiểm tra file VFM Core 1.3 với thuộc tính text CVNSS4.0 ngay trong trình duyệt.">
+  <title>xulyVFM — Giải mã VFM + CVNSS4.0</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand"><div class="mark">VF</div><div><h1>xulyVFM</h1><p>VFM Core 1.3 · CVNSS4.0 text profile</p></div></div>
+    <div class="badge">Client-side · không tải file lên server</div>
+  </header>
+
+  <section class="hero">
+    <div class="panel intro">
+      <h2>Thả một file <code>.vfm</code>.<br>Giải mã ngay.</h2>
+      <p>Trang đọc Header, Directory, META, PROF, HASH, kiểm tra CRC32C/SHA-256 và tự nhận diện profile <b>Feature + CVNSS4.0</b>. Unicode gốc được giữ nguyên; CVNSS4.0 là khóa text dẫn xuất để tìm kiếm và đối chiếu.</p>
+    </div>
+    <div class="panel drop">
+      <label class="dropzone" id="dropzone">
+        <div><strong>Chọn hoặc kéo file VFM vào đây</strong><span>Hỗ trợ VFM Core 1.x; tối ưu cho Core 1.3</span></div>
+        <input id="fileInput" type="file" accept=".vfm,application/octet-stream">
+      </label>
+      <div class="statusline" id="status">Chưa có file.</div>
+    </div>
+  </section>
+
+  <main id="result" class="hidden">
+    <section class="cards">
+      <div class="panel card"><div class="k">Phiên bản</div><div class="v" id="cVersion">—</div></div>
+      <div class="panel card"><div class="k">Kích thước</div><div class="v" id="cSize">—</div></div>
+      <div class="panel card"><div class="k">Sections</div><div class="v" id="cSections">—</div></div>
+      <div class="panel card"><div class="k">Features</div><div class="v" id="cFeatures">—</div></div>
+      <div class="panel card"><div class="k">Dataset UUID</div><div class="v small" id="cUUID">—</div></div>
+    </section>
+
+    <section class="panel">
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="overview">Tổng quan</button>
+        <button class="tab" data-tab="sections">Sections</button>
+        <button class="tab" data-tab="features">Đối tượng</button>
+        <button class="tab" data-tab="text">Text · CVNSS4.0</button>
+        <button class="tab" data-tab="raw">Raw</button>
+      </nav>
+
+      <div class="tabpane" data-pane="overview">
+        <div class="grid2">
+          <div><h3 class="section-title">Kiểm tra toàn vẹn</h3><div id="checks" class="checklist"></div></div>
+          <div><h3 class="section-title">Profiles</h3><div id="profiles" class="chips"></div><h3 class="section-title" style="margin-top:20px">Xem nhanh hình học</h3><canvas id="preview" width="800" height="420"></canvas></div>
+        </div>
+      </div>
+
+      <div class="tabpane hidden" data-pane="sections">
+        <div class="tablewrap"><table><thead><tr><th>FourCC</th><th>ID</th><th>Profile</th><th>Offset</th><th>Stored</th><th>Raw</th><th>CRC32C</th></tr></thead><tbody id="sectionsBody"></tbody></table></div>
+      </div>
+
+      <div class="tabpane hidden" data-pane="features">
+        <div class="toolbar"><input class="search" id="featureSearch" placeholder="Tìm feature, tên, thuộc tính…"><span class="muted" id="featureCount"></span></div>
+        <div class="tablewrap"><table><thead><tr><th>ID</th><th>Geometry</th><th>Tên</th><th>Thuộc tính</th></tr></thead><tbody id="featuresBody"></tbody></table></div>
+      </div>
+
+      <div class="tabpane hidden" data-pane="text">
+        <div class="toolbar"><input class="search" id="textSearch" placeholder="Tìm Unicode hoặc CVNSS4.0…"><span class="muted" id="textCount"></span></div>
+        <div class="tablewrap"><table><thead><tr><th>Feature</th><th>Field</th><th>Unicode</th><th>CVNSS4.0</th><th>Nguồn</th></tr></thead><tbody id="textBody"></tbody></table></div>
+      </div>
+
+      <div class="tabpane hidden" data-pane="raw"><pre id="raw"></pre></div>
+    </section>
+  </main>
+
+  <footer class="footer"><span>Chuẩn tham chiếu: Base27-CVNSS/VFM · Core 1.3</span><span><a href="./convert.html">Công cụ phụ KML → VFM</a> · <a href="https://github.com/xulytiengviet/xulyVFM">Mã nguồn GitHub</a></span></footer>
+</div>
+<script src="./assets/cvnss-converter.js"></script>
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>
