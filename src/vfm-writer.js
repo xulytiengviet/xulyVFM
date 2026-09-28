@@ -73,18 +73,23 @@ function parseCoords(text){
 }
 function childElements(el){return [...el.children];}
 function local(el){return el.localName;}
+function firstNS(node,name){return node?.getElementsByTagNameNS?.("*",name)?.[0]||null;}
+function allNS(node,name){return [...(node?.getElementsByTagNameNS?.("*",name)||[])];}
 function geometryFrom(el){
   if(!el)return null;
   if(local(el)==="Point"){
-    const c=el.querySelector("coordinates");const a=c?parseCoords(c.textContent):[];return a[0]?{type:"Point",coordinates:a[0]}:null;
+    const c=firstNS(el,"coordinates");const a=c?parseCoords(c.textContent):[];return a[0]?{type:"Point",coordinates:a[0]}:null;
   }
   if(local(el)==="LineString"){
-    const c=el.querySelector("coordinates");return c?{type:"LineString",coordinates:parseCoords(c.textContent)}:null;
+    const c=firstNS(el,"coordinates");return c?{type:"LineString",coordinates:parseCoords(c.textContent)}:null;
   }
   if(local(el)==="Polygon"){
     const rings=[];
-    const outer=el.querySelector("outerBoundaryIs coordinates"); if(outer)rings.push(parseCoords(outer.textContent));
-    for(const inner of el.querySelectorAll("innerBoundaryIs coordinates"))rings.push(parseCoords(inner.textContent));
+    const outerBoundary=firstNS(el,"outerBoundaryIs"), outer=outerBoundary?firstNS(outerBoundary,"coordinates"):null;
+    if(outer)rings.push(parseCoords(outer.textContent));
+    for(const boundary of allNS(el,"innerBoundaryIs")){
+      const inner=firstNS(boundary,"coordinates");if(inner)rings.push(parseCoords(inner.textContent));
+    }
     return {type:"Polygon",coordinates:rings};
   }
   if(local(el)==="MultiGeometry"){
@@ -98,7 +103,7 @@ function geometryFrom(el){
   return null;
 }
 function stable32(s){let h=0x811c9dc5;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193);}return (h>>>0).toString(16).padStart(8,"0");}
-function textValue(node,selector){const x=node.querySelector(selector);return x?x.textContent.trim():"";}
+function textValue(node,name){const x=firstNS(node,name);return x?x.textContent.trim():"";}
 function cv4(s){
   if(!s||!globalThis.CVNSSConverter)return "";
   try{return globalThis.CVNSSConverter.fromCqn(s.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim()).cvss||"";}catch{return "";}
@@ -106,7 +111,7 @@ function cv4(s){
 
 export function kmlToFeaturePayload(xmlText,fileName="dataset.kml"){
   const xml=new DOMParser().parseFromString(xmlText,"application/xml");
-  const err=xml.querySelector("parsererror");if(err)throw new Error("KML/XML không hợp lệ");
+  const err=xml.getElementsByTagName("parsererror")[0]||firstNS(xml,"parsererror");if(err)throw new Error("KML/XML không hợp lệ");
   const placemarks=[...xml.getElementsByTagNameNS("*","Placemark")];
   const features=[];
   for(let i=0;i<placemarks.length;i++){
