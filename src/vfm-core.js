@@ -178,7 +178,7 @@ export async function parseVFM(arrayBuffer){
 
   const hashRecords=parseHashRecords(hashBytes);
   for(const e of directory){
-    if((e.flags&(1<<1)) && !(e.flags&(1<<3)) && e.compressionId===0 && e.encryptionId===0){
+    if((e.flags&(1<<1)) && !(e.flags&(1<<3)) && e.encryptionId===0){
       const rec=hashRecords[e.hashRef];
       if(!rec){ check(e.type+" content hash",false,"hash_ref ngoài phạm vi"); continue; }
       const raw=rawSections.get(e.logicalId);
