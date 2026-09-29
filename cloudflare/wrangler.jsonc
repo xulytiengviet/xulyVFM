@@ -1,0 +1,36 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "xulyvfm-convert",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "containers": [
+    {
+      "class_name": "GdalContainer",
+      "image": "../backend-go/Dockerfile",
+      "instance_type": "standard-2",
+      "max_instances": 3,
+      "constraints": {
+        "regions": ["APAC"]
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GDAL_CONTAINER",
+        "class_name": "GdalContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GdalContainer"]
+    }
+  ],
+  "vars": {
+    "ALLOWED_ORIGIN": "https://xulytiengviet.github.io",
+    "MAX_STREAM_BYTES": "90000000"
+  }
+}
