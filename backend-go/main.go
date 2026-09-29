@@ -80,6 +80,11 @@ func main() {
 }
 
 func convert(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 100_000_000)
 	start := time.Now()
 	reqID := r.Header.Get("X-Request-ID")
 	sourceID := strings.ToLower(r.Header.Get("X-XulyVFM-Source"))
@@ -161,7 +166,7 @@ func convert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if source.Raster {
-		err = runRaster(ctx, inputPath, outputPath, target, targetCRS)
+		err = runRaster(ctx, inputPath, outputPath, target, sourceCRS, targetCRS)
 	} else {
 		err = runVector(ctx, inputPath, outputPath, source, target, sourceCRS, targetCRS)
 	}
@@ -332,7 +337,15 @@ func unzipGDB(zipPath, dst string) error {
 		return err
 	}
 	defer zr.Close()
+	var expanded uint64
+	if len(zr.File) > 10000 {
+		return errors.New("too many zip entries")
+	}
 	for _, zf := range zr.File {
+		if zf.UncompressedSize64 > 192*1024*1024 || expanded > 192*1024*1024-zf.UncompressedSize64 {
+			return errors.New("expanded zip exceeds limit")
+		}
+		expanded += zf.UncompressedSize64
 		if zf.FileInfo().IsDir() {
 			continue
 		}
@@ -348,12 +361,15 @@ func unzipGDB(zipPath, dst string) error {
 		if err != nil {
 			return err
 		}
-		out, err := os.OpenFile(filepath.Join(dst, base), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		out, err := os.OpenFile(filepath.Join(dst, base), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			rc.Close()
 			return err
 		}
-		_, copyErr := io.Copy(out, rc)
+		written, copyErr := io.Copy(out, io.LimitReader(rc, int64(zf.UncompressedSize64)+1))
+		if written != int64(zf.UncompressedSize64) {
+			copyErr = errors.New("zip size mismatch")
+		}
 		closeErr := out.Close()
 		rc.Close()
 		if copyErr != nil {
@@ -406,12 +422,15 @@ func runVector(ctx context.Context, input, output string, source, target formatS
 	return command(ctx, "ogr2ogr", args...)
 }
 
-func runRaster(ctx context.Context, input, output string, target formatSpec, targetCRS string) error {
+func runRaster(ctx context.Context, input, output string, target formatSpec, sourceCRS, targetCRS string) error {
 	common := []string{"-of", target.Driver}
 	if target.Driver == "GTiff" {
 		common = append(common, "-co", "TILED=YES", "-co", "COMPRESS=DEFLATE", "-co", "BIGTIFF=IF_SAFER", "-co", "NUM_THREADS=ALL_CPUS")
 	}
 	if targetCRS != "" && targetCRS != "AUTO" && targetCRS != "KEEP" {
+		if sourceCRS != "" && sourceCRS != "AUTO" && sourceCRS != "KEEP" {
+			common = append(common, "-s_srs", sourceCRS)
+		}
 		args := append(common, "-t_srs", targetCRS, input, output)
 		return command(ctx, "gdalwarp", args...)
 	}

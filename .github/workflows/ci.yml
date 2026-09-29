@@ -14,3 +14,6 @@ jobs:
         with:
           node-version: 22
       - run: npm test
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/browser.mjs

@@ -3,13 +3,15 @@ import { parseVFM, formatBytes } from "./vfm-core.js";
 import { buildFeatureVFM } from "./vfm-writer.js";
 import { buildRasterVFM } from "./vfm-raster.js";
 import { kmlToFeaturePayload } from "./vfm-writer.js";
-import { featurePayloadToKML, kmlToKMZ, kmzToKML, saveBytes, saveText, zipFiles } from "./geo-exchange.js";
+import { featurePayloadToKML, kmlToKMZ, kmzToKML, saveBytes as rawSaveBytes, saveText as rawSaveText, zipFiles } from "./geo-exchange.js";
 import { geoJSONToFeaturePayload, featurePayloadToGeoJSON, featurePayloadToJSON, parseGISJSON } from "./light-formats.js";
 import { encodeGeoCBOR, decodeGeoCBOR } from "./geocbor.js";
 import { vectorToGeoJSON, geoJSONToVector, inspectGdal, rasterConvert, rasterToGTiff, warmGdal, isGdalReady } from "./gdal-engine.js";
 import { chooseExecution } from "./execution-router.js";
 import { RUNTIME_CONFIG, backendAvailable } from "./runtime-config.js";
 
+import { applyOutputPolicy } from "./output-policy.js";
+import { createIdentity, exportIdentity, importIdentity, fingerprint, signOutput, verifyOutput } from "./provenance.js";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const input=$("#fileInput"),folderInput=$("#folderInput"),drop=$("#dropzone"),status=$("#status");
 const jobPanel=$("#jobPanel"),sourceName=$("#sourceName"),sourceFiles=$("#sourceFiles"),sourceIcon=$("#sourceIcon");
@@ -18,6 +20,25 @@ let state={files:[],fileList:null,format:null,payload:null,vfm:null,sourceIsRast
 let category="Tất cả",modalResolver=null;
 
 const te=new TextEncoder(),td=new TextDecoder();
+let signingIdentity=null, verifiedPackage=null;
+function outputMode(){return $("#outputMode").value;}
+function selectedFields(){const value=$("#cvnssFields").value.trim();return value?value.split(",").map(x=>x.trim()).filter(Boolean):null;}
+function policyPayload(payload){return applyOutputPolicy(payload,outputMode(),selectedFields());}
+async function saveBytes(bytes,name,mime="application/octet-stream"){
+  if(outputMode()==="signed"){
+    const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes instanceof Blob?await bytes.arrayBuffer():bytes);
+    const signed=await signOutput(data,{fileName:name,mime,owner:$("#ownerName").value,identity:signingIdentity});
+    return rawSaveBytes(signed,name+".vfms","application/json");
+  }
+  return rawSaveBytes(bytes,name,mime);
+}
+async function saveText(text,name,mime="application/vnd.google-earth.kml+xml"){return saveBytes(te.encode(text),name,mime);}
+function syncOutputMode(){
+  const mode=outputMode();
+  $("#fieldPicker").classList.toggle("hidden",mode!=="cvnss");
+  $("#signingOptions").classList.toggle("hidden",mode!=="signed");
+  $("#outputModeHint").textContent=mode==="normal"?"Giữ thuộc tính Unicode; không xuất bản cv4 song song.":mode==="cvnss"?"Thay text trong các trường đã chọn bằng CVNSS4.0 (kể cả text lồng nhau). Giữ tên trường, số, geometry, ID và liên kết. Đây không phải mã hóa bảo mật và không yêu cầu xin quyền đọc.":"Xuất gói .vfms chứa file GIS + hash + chữ ký. Thuộc tính vẫn đọc được. Tên khai báo chỉ được tin cậy khi đối chiếu khóa qua kênh độc lập.";
+}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function setStatus(text,kind=""){status.textContent=text;status.className="total-status "+kind;}
 function baseName(name="dataset"){return name.replace(/\.(vfm|geojson|json|kml|kmz|gpx|gml|gpkg|shp|dxf|dgn|tab|mif|mid|e00|sqlite|db|tif|tiff|csv|txt|cbor|zip)$/i,"");}
@@ -122,6 +143,7 @@ async function parseNativeSource(){
   const f=state.files[0],bytes=new Uint8Array(await f.arrayBuffer());
   if(state.format.id==="vfm"){
     state.vfm=await parseVFM(bytes);
+    if(!state.vfm.report.ok)throw new Error("VFM không đạt kiểm tra toàn vẹn; dừng chuyển đổi.");
     if(state.vfm.featureCollection){state.payload=state.vfm.featureCollection;state.sourceKind="vector";state.sourceIsRaster=false;}
     else if(state.vfm.rasterAsset){state.sourceKind="raster";state.sourceIsRaster=true;}
     else throw new Error("VFM không có Feature hoặc Raster profile mà Total GIS Converter hiểu.");
@@ -140,7 +162,9 @@ async function parseNativeSource(){
 
 async function selectFiles(files){
   if(!files?.length)return;
-  const arr=[...files],format=detectFormat(arr);
+  const arr=[...files];
+  if(arr.reduce((n,f)=>n+f.size,0)>90_000_000){setStatus("Tổng dữ liệu vượt giới hạn 90 MB.","badtext");return;}
+  const format=detectFormat(arr);
   if(!format){await showModal({title:"Không nhận diện được định dạng",text:"Đuôi file chưa nằm trong ma trận Total GIS Converter.",extra:"Có thể đóng gói/đổi tên đúng phần mở rộng hoặc mở issue trên GitHub để bổ sung driver."});return;}
   const pf=preflight(arr,format);
   if(!pf.ok){await showModal({title:"Thiếu thành phần dataset",text:pf.reason});return;}
@@ -198,30 +222,30 @@ async function discoverUnknownType(){
 async function convertVector(target){
   const targetProjection=target.crsLocked||targetCrs.value;
   if(target.id==="vfm"){
-    const p=await loadVectorPayload(targetProjection);
+    const p=policyPayload(await loadVectorPayload(targetProjection));
     const out=await buildFeatureVFM(p,{compression:"auto"});
     await saveBytes(out,baseName(primaryName())+".vfm");
     return `VFM · ${formatBytes(out.length)} · ${p.featureCount.toLocaleString()} feature`;
   }
   if(target.id==="kml"||target.id==="kmz"){
-    const p=await loadVectorPayload("EPSG:4326"),kml=featurePayloadToKML(p);
+    const p=policyPayload(await loadVectorPayload("EPSG:4326")),kml=featurePayloadToKML(p);
     if(target.id==="kml"){await saveText(kml,baseName(primaryName())+".kml");return "KML 2.2 · WGS84";}
     const kmz=await kmlToKMZ(kml);await saveBytes(kmz,baseName(primaryName())+".kmz","application/vnd.google-earth.kmz");return `KMZ · ${formatBytes(kmz.length)}`;
   }
   if(target.id==="geojson"){
-    const p=await loadVectorPayload("EPSG:4326"),txt=JSON.stringify(featurePayloadToGeoJSON(p));
+    const p=policyPayload(await loadVectorPayload("EPSG:4326")),txt=JSON.stringify(featurePayloadToGeoJSON(p));
     await saveText(txt,baseName(primaryName())+".geojson","application/geo+json");return "GeoJSON · EPSG:4326";
   }
   if(target.id==="json"){
-    const p=await loadVectorPayload(targetProjection),txt=featurePayloadToJSON(p);
+    const p=policyPayload(await loadVectorPayload(targetProjection)),txt=featurePayloadToJSON(p);
     await saveText(txt,baseName(primaryName())+".json","application/json");return `GIS JSON · ${p.crs}`;
   }
   if(target.id==="cbor"){
-    const p=await loadVectorPayload(targetProjection),bytes=encodeGeoCBOR(p);
+    const p=policyPayload(await loadVectorPayload(targetProjection)),bytes=encodeGeoCBOR(p);
     await saveBytes(bytes,baseName(primaryName())+".cbor","application/cbor");return `GeoCBOR · ${formatBytes(bytes.length)}`;
   }
 
-  const p=await loadVectorPayload(targetProjection);
+  const p=policyPayload(await loadVectorPayload(targetProjection));
   const src=normalizeCrs(p.crs||targetProjection||"UNKNOWN");
   if(src==="UNKNOWN"&&targetProjection!=="KEEP")throw new Error("Không xác định được CRS cho bridge vector.");
   const outputs=await geoJSONToVector(payloadFile(p),{driver:target.driver,sourceCrs:src==="UNKNOWN"?"AUTO":src,targetCrs:"KEEP",creation:target.creation||[],onStatus:t=>setStatus(t,"busy")});
@@ -246,7 +270,7 @@ async function convertRaster(target){
   const tc=targetCrs.value;
   const source=await rasterSourceFiles();
   if(target.id==="vfm"){
-    const r=await rasterToGTiff(source,{targetCrs:tc,onStatus:t=>setStatus(t,"busy")});
+    const r=await rasterToGTiff(source,{sourceCrs:declaredSourceCrs(),targetCrs:tc,onStatus:t=>setStatus(t,"busy")});
     const info=r.info||{};
     const crs=tc!=="KEEP"?tc:(normalizeCrs(info.projectionWkt||state.vfm?.rasterInfo?.crs)||"UNKNOWN");
     const v=await buildRasterVFM(r.bytes,{crs,sourceFile:primaryName(),width:info.width,height:info.height,bandCount:info.bandCount});
@@ -256,11 +280,11 @@ async function convertRaster(target){
     if(state.format.id==="vfm"&&tc==="KEEP"){
       await saveBytes(state.vfm.rasterAsset,baseName(primaryName())+".tif","image/tiff");return `GeoTIFF · ${formatBytes(state.vfm.rasterAsset.length)}`;
     }
-    const r=await rasterConvert(source,{driver:"GTiff",targetCrs:tc,onStatus:t=>setStatus(t,"busy")});
+    const r=await rasterConvert(source,{driver:"GTiff",sourceCrs:declaredSourceCrs(),targetCrs:tc,onStatus:t=>setStatus(t,"busy")});
     await saveBytes(r.bytes,baseName(primaryName())+".tif","image/tiff");return `GeoTIFF · ${formatBytes(r.bytes.length)}`;
   }
   if(target.id==="gpkg"){
-    const r=await rasterConvert(source,{driver:"GPKG",targetCrs:tc,onStatus:t=>setStatus(t,"busy")});
+    const r=await rasterConvert(source,{driver:"GPKG",sourceCrs:declaredSourceCrs(),targetCrs:tc,onStatus:t=>setStatus(t,"busy")});
     await saveBytes(r.bytes,baseName(primaryName())+".gpkg");return `GeoPackage Raster · ${formatBytes(r.bytes.length)}`;
   }
   throw new Error("Đường chuyển raster này chưa được định nghĩa an toàn.");
@@ -274,6 +298,7 @@ function responseFileName(response,fallback){
 }
 async function saveResponseStream(response,fileName){
   if(!response.body)throw new Error("Backend không trả stream dữ liệu.");
+  if(outputMode()==="signed")return saveBytes(new Uint8Array(await response.arrayBuffer()),fileName);
   if("showSaveFilePicker" in window){
     const ext="."+fileName.split(".").pop().toLowerCase();
     const handle=await window.showSaveFilePicker({
@@ -289,35 +314,63 @@ async function saveResponseStream(response,fileName){
   a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),30000);
 }
+async function backendRequest(files,sourceId,targetId,sourceProjection,targetProjection,model="vector"){
+  const form=new FormData();for(const file of files)form.append("file",file,file.name);
+  const response=await fetch(RUNTIME_CONFIG.backendEndpoint+"/v1/convert",{method:"POST",headers:{
+    "X-XulyVFM-Source":sourceId,"X-XulyVFM-Target":targetId,
+    "X-XulyVFM-Source-CRS":sourceProjection,"X-XulyVFM-Target-CRS":targetProjection,"X-XulyVFM-Model":model
+  },body:form});
+  if(!response.ok)throw new Error((await response.text())||"HTTP "+response.status);
+  return response;
+}
 async function convertViaBackend(target){
-  const endpoint=RUNTIME_CONFIG.backendEndpoint+"/v1/convert";
-  const form=new FormData();
-  for(const file of state.files)form.append("file",file,file.name);
-  const model=(state.sourceIsRaster||state.format.id==="tif"||target.id==="tif")?"raster":"vector";
-  const headers={
-    "X-XulyVFM-Source":state.format.id,
-    "X-XulyVFM-Target":target.id,
-    "X-XulyVFM-Source-CRS":declaredSourceCrs(),
-    "X-XulyVFM-Target-CRS":target.crsLocked||targetCrs.value,
-    "X-XulyVFM-Model":model
-  };
-  setStatus("Đang chuyển đổi bằng Cloudflare native GDAL…","busy");
-  const response=await fetch(endpoint,{method:"POST",headers,body:form});
-  if(!response.ok){
-    let msg="HTTP "+response.status;
-    try{msg=(await response.text())||msg;}catch{}
-    throw new Error(msg);
+  setStatus("Đang chuyển đổi bằng native GDAL…","busy");
+  const nativeTargets=new Set(["vfm","json","cbor","kml","kmz","geojson"]);
+  const tc=target.crsLocked||targetCrs.value;
+  const raster=state.sourceIsRaster;
+  if(raster){
+    if(outputMode()==="cvnss")throw new Error("CVNSS4.0 không áp dụng cho raster.");
+    const files=state.format.id==="vfm"?[await rasterSourceFiles()]:state.files;
+    const response=await backendRequest(files,state.format.id==="vfm"?"tif":state.format.id,target.id==="vfm"?"tif":target.id,declaredSourceCrs(),tc,"raster");
+    if(target.id==="vfm"){
+      const bytes=new Uint8Array(await response.arrayBuffer());
+      const out=await buildRasterVFM(bytes,{crs:tc==="KEEP"?declaredSourceCrs():tc,sourceFile:primaryName()});
+      await saveBytes(out,baseName(primaryName())+".vfm");
+    }else await saveResponseStream(response,responseFileName(response,baseName(primaryName())+"."+outputExt(target.id)));
+    return target.name+" · native GDAL";
   }
-  const name=responseFileName(response,baseName(primaryName())+"."+outputExt(target.id));
-  await saveResponseStream(response,name);
-  return `${target.name} · Cloudflare native GDAL · không lưu persistent`;
+  // Direct GDAL preserves multi-layer models when no attribute transformation is requested.
+  if(!state.payload&&!nativeTargets.has(target.id)&&outputMode()!=="cvnss"){
+    const response=await backendRequest(state.files,state.format.id,target.id,declaredSourceCrs(),tc);
+    await saveResponseStream(response,responseFileName(response,baseName(primaryName())+"."+outputExt(target.id)));
+    return target.name+" · native GDAL";
+  }
+  let payload=state.payload;
+  if(!payload){
+    // RFC 7946 bridge is always WGS84; never label projected coordinates as GeoJSON.
+    const response=await backendRequest(state.files,state.format.id,"geojson",declaredSourceCrs(),"EPSG:4326");
+    payload=geoJSONToFeaturePayload(JSON.parse(await response.text()),primaryName(),"EPSG:4326");
+  }
+  if(nativeTargets.has(target.id)){
+    const previous=state.payload,oldCrs=sourceCrs.value;
+    try{state.payload=payload;sourceCrs.value=normalizeCrs(payload.crs);return await convertVector(target);}
+    finally{state.payload=previous;sourceCrs.value=oldCrs;}
+  }
+  const transformed=policyPayload(payload);
+  const response=await backendRequest([payloadFile(transformed)],"geojson",target.id,normalizeCrs(payload.crs),tc);
+  await saveResponseStream(response,responseFileName(response,baseName(primaryName())+"."+outputExt(target.id)));
+  return target.name+" · native GDAL";
 }
 
 async function runConvert(){
   if(!state.format)return;
   const target=FORMAT_MAP.get(targetFormat.value);if(!target)return;
+  const locked=[...document.querySelectorAll("#jobPanel input,#jobPanel select,#fileInput,#folderInput,#folderBtn,#createKey,#loadKey,#clearKey")];
+  const oldDisabled=locked.map(e=>e.disabled);locked.forEach(e=>e.disabled=true);
   convertBtn.disabled=true;const old=convertBtn.textContent;convertBtn.textContent="Đang xử lý…";
   try{
+    if(outputMode()==="signed"&&(!signingIdentity||!$("#ownerName").value.trim()))throw new Error("Nhập tên người ký và tạo hoặc nạp khóa trước khi chuyển đổi.");
+    if(outputMode()==="cvnss"&&state.sourceIsRaster)throw new Error("CVNSS4.0 áp dụng cho thuộc tính vector; raster hãy chọn chế độ 1 hoặc 3.");
     const plan=chooseExecution({
       files:state.files,
       sourceId:state.format.id,
@@ -332,12 +385,15 @@ async function runConvert(){
     }
 
     if(plan.tier==="backend"){
+      if(state.format.id==="gpkg"&&state.sourceKind==="unknown")await discoverUnknownType();
       const cap=compatibility(state.format,target,{sourceIsRaster:state.sourceIsRaster,targetCrs:targetCrs.value});
       if(!cap.ok){await showModal({title:"Không thể chuyển đổi an toàn",text:cap.reason,extra:"Ứng dụng chặn thao tác thay vì tạo file sai mô hình dữ liệu."});return;}
       if(cap.level==="warning"){
         const yes=await showModal({title:"Có thể mất một phần thông tin",text:cap.reason,extra:"Backend dùng native GDAL nhưng khác biệt mô hình dữ liệu vẫn tồn tại. Style, topology, domain, attachment hoặc schema đặc thù có thể không round-trip.",allowContinue:true,continueLabel:"Vẫn chuyển đổi"});
         if(!yes)return;
       }
+      const approved=await showModal({title:"Xử lý trên máy chủ",text:"Tệp sẽ được gửi tới "+RUNTIME_CONFIG.backendEndpoint+" để GDAL xử lý. Máy chủ dùng file tạm và xóa sau tác vụ.",allowContinue:true,continueLabel:"Đồng ý gửi tệp"});
+      if(!approved)return;
       const t0=performance.now();
       const msg=await convertViaBackend(target);
       setStatus(`Hoàn tất: ${msg} · ${((performance.now()-t0)/1000).toFixed(2)} s`,"good");
@@ -352,12 +408,13 @@ async function runConvert(){
       if(!yes)return;
     }
     const t0=performance.now();
+    if(outputMode()==="cvnss"&&state.sourceIsRaster)throw new Error("Raster không có bảng thuộc tính vector để chuyển CVNSS4.0.");
     const msg=state.sourceIsRaster?await convertRaster(target):await convertVector(target);
     setStatus(`Hoàn tất: ${msg} · ${plan.tier==="native"?"Browser native":"GDAL/WASM"} · ${((performance.now()-t0)/1000).toFixed(2)} s`,"good");
   }catch(err){
     console.error(err);setStatus("Chuyển đổi thất bại: "+err.message,"badtext");
     await showModal({title:"Chuyển đổi thất bại",text:err.message,extra:"Kiểm tra đủ sidecar, CRS nguồn, loại geometry và giới hạn driver trình duyệt/backend."});
-  }finally{convertBtn.disabled=false;convertBtn.textContent=old;}
+  }finally{locked.forEach((e,i)=>e.disabled=oldDisabled[i]);convertBtn.disabled=false;convertBtn.textContent=old;}
 }
 
 fillCrs();renderCategories();renderFormats();renderTable();
@@ -391,3 +448,29 @@ $("#modalClose").addEventListener("click",()=>closeModal(false));
 $("#modalCancel").addEventListener("click",()=>closeModal(false));
 $("#modalContinue").addEventListener("click",()=>closeModal(true));
 $("#modal").addEventListener("click",e=>{if(e.target.id==="modal")closeModal(false);});
+
+$("#outputMode").addEventListener("change",syncOutputMode);syncOutputMode();
+$("#createKey").addEventListener("click",async()=>{
+  const button=$("#createKey");button.disabled=true;
+  try{
+    const identity=await createIdentity();
+    const bytes=await exportIdentity(identity,$("#keyPassword").value);
+    await rawSaveBytes(bytes,"owner-signing-key.vfmkey","application/json");
+    signingIdentity=identity;$("#keyStatus").textContent="Khóa đã nạp · SHA-256: "+await fingerprint(identity.publicJwk)+" · Hãy giữ file khóa và mật khẩu; không thể khôi phục nếu mất.";
+  }catch(e){$("#keyStatus").textContent=e.message;}finally{$("#keyPassword").value="";button.disabled=false;}
+});
+$("#loadKey").addEventListener("click",()=>$("#keyInput").click());
+$("#keyInput").addEventListener("change",async e=>{
+  signingIdentity=null;
+  try{const f=e.target.files[0];if(!f)return;if(f.size>16384)throw new Error("File khóa quá lớn.");signingIdentity=await importIdentity(new Uint8Array(await f.arrayBuffer()),$("#keyPassword").value);$("#keyStatus").textContent="Đã nạp khóa · SHA-256: "+await fingerprint(signingIdentity.publicJwk);}
+  catch{$("#keyStatus").textContent="Không nạp được khóa: sai mật khẩu hoặc file khóa không hợp lệ.";}
+  finally{$("#keyPassword").value="";e.target.value="";}
+});
+$("#clearKey").addEventListener("click",()=>{signingIdentity=null;$("#keyPassword").value="";$("#keyStatus").textContent="Đã gỡ khóa khỏi phiên.";});
+$("#trustedFingerprint").addEventListener("input",()=>{verifiedPackage=null;$("#extractVerified").disabled=true;$("#verifyStatus").textContent="Chọn lại gói để xác minh với dấu vân tay mới.";});
+$("#verifyInput").addEventListener("change",async e=>{
+  verifiedPackage=null;$("#extractVerified").disabled=true;
+  try{const f=e.target.files[0];if(!f)return;if(f.size>125_000_000)throw new Error("Gói quá lớn.");const v=await verifyOutput(new Uint8Array(await f.arrayBuffer()),$("#trustedFingerprint").value);verifiedPackage=v;$("#verifyStatus").textContent=(v.trusted?"Chữ ký hợp lệ; khớp khóa tin cậy.":"Chữ ký hợp lệ; CHƯA xác minh danh tính người ký.")+" Tên khai báo: "+v.manifest.owner+" · File: "+v.manifest.fileName+" · Khóa: "+v.fingerprint;$("#extractVerified").disabled=false;}
+  catch(err){$("#verifyStatus").textContent="Không xác minh được: "+err.message;}finally{e.target.value="";}
+});
+$("#extractVerified").addEventListener("click",async()=>{try{if(verifiedPackage)await rawSaveBytes(verifiedPackage.data,verifiedPackage.manifest.fileName,"application/octet-stream");}catch(e){$("#verifyStatus").textContent=e.message;}});

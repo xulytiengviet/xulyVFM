@@ -1,9 +1,12 @@
 {
   "name": "xulyvfm",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --check src/total-app.js && node --check src/format-registry.js && node --check src/gdal-engine.js && node tests/smoke.mjs"
+    "test": "node --check src/total-app.js && node --check src/format-registry.js && node --check src/gdal-engine.js && node tests/smoke.mjs && node tests/output-modes.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
   }
 }

@@ -1,3 +1,4 @@
+import { readBoundedStream, MAX_EXPANDED_BYTES } from "./resource-limits.js";
 const te=new TextEncoder();
 const td=new TextDecoder();
 
@@ -102,7 +103,7 @@ function findEOCD(bytes){
 async function inflateRaw(bytes){
   if(typeof DecompressionStream==="undefined")throw new Error("Trình duyệt chưa hỗ trợ giải nén KMZ/DEFLATE");
   const ds=new DecompressionStream("deflate-raw");
-  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer());
+  return readBoundedStream(new Blob([bytes]).stream().pipeThrough(ds));
 }
 
 export async function kmzToKML(input){
@@ -116,10 +117,11 @@ export async function kmzToKML(input){
     const method=dv.getUint16(at+10,true),comp=dv.getUint32(at+20,true),raw=dv.getUint32(at+24,true);
     const fn=dv.getUint16(at+28,true),ex=dv.getUint16(at+30,true),cm=dv.getUint16(at+32,true),local=dv.getUint32(at+42,true);
     const name=td.decode(bytes.subarray(at+46,at+46+fn));
-    if(/\.kml$/i.test(name) && (!best || /(^|\/)doc\.kml$/i.test(name)))best={name,method,comp,raw,local};
+    if(/\.kml$/i.test(name) && (!best || /(^|\/)doc\.kml$/i.test(name)))best={name,method,comp,raw,local,crc:dv.getUint32(at+16,true)};
     at+=46+fn+ex+cm;
   }
   if(!best)throw new Error("KMZ không chứa file KML");
+  if(best.raw>MAX_EXPANDED_BYTES)throw new Error("KML giải nén vượt giới hạn an toàn.");
   if(dv.getUint32(best.local,true)!==0x04034b50)throw new Error("Local header KMZ không hợp lệ");
   const fn=dv.getUint16(best.local+26,true),ex=dv.getUint16(best.local+28,true);
   const start=best.local+30+fn+ex,compressed=bytes.subarray(start,start+best.comp);
@@ -128,6 +130,7 @@ export async function kmzToKML(input){
   else if(best.method===8)raw=await inflateRaw(compressed);
   else throw new Error("KMZ dùng compression method chưa hỗ trợ: "+best.method);
   if(best.raw && raw.length!==best.raw)throw new Error("KMZ uncompressed size không khớp");
+  if(crc32(raw)!==best.crc)throw new Error("KMZ CRC32 không khớp.");
   return {kml:td.decode(raw),entryName:best.name};
 }
 

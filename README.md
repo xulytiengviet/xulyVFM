@@ -124,3 +124,7 @@ Production architecture is documented in:
 - [docs/CLOUDFLARE-COST.md](docs/CLOUDFLARE-COST.md)
 
 Heavy conversions can be routed to an optional Cloudflare Container running native GDAL. The default backend path uses ephemeral container disk only and does not persist user files to R2/KV/D1/DO storage.
+
+## Chế độ đầu ra 1.1
+
+Ba lựa chọn: Bình thường, CVNSS4.0 thuộc tính, và gói hash + chữ ký số `.vfms`. Xem [hướng dẫn và giới hạn](docs/OUTPUT-MODES.md). Chữ ký không mã hóa dữ liệu; danh tính chỉ được tin cậy sau khi đối chiếu khóa qua kênh độc lập.
