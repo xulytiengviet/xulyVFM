@@ -64,18 +64,33 @@ function cat(parts){const n=parts.reduce((s,p)=>s+p.length,0),o=new Uint8Array(n
 function u16(a,o,v){new DataView(a.buffer,a.byteOffset,a.byteLength).setUint16(o,v,true);}
 function u32(a,o,v){new DataView(a.buffer,a.byteOffset,a.byteLength).setUint32(o,v>>>0,true);}
 
-export function kmlToKMZ(kmlText){
+async function deflateRawBytes(bytes){
+  if(typeof CompressionStream==="undefined")return null;
+  try{
+    const cs=new CompressionStream("deflate-raw");
+    const abPromise=new Response(cs.readable).arrayBuffer();
+    const writer=cs.writable.getWriter();await writer.write(bytes);await writer.close();
+    return new Uint8Array(await abPromise);
+  }catch{return null;}
+}
+
+export async function kmlToKMZ(kmlText){
   const name=te.encode("doc.kml"),data=te.encode(kmlText),crc=crc32(data);
+  const deflated=await deflateRawBytes(data);
+  const useDeflate=!!deflated && deflated.length<data.length;
+  const body=useDeflate?deflated:data,method=useDeflate?8:0;
   const local=new Uint8Array(30+name.length);
-  u32(local,0,0x04034b50);u16(local,4,20);u16(local,6,0);u16(local,8,0);
-  u32(local,14,crc);u32(local,18,data.length);u32(local,22,data.length);u16(local,26,name.length);u16(local,28,0);local.set(name,30);
+  u32(local,0,0x04034b50);u16(local,4,20);u16(local,6,0);u16(local,8,method);
+  u32(local,14,crc);u32(local,18,body.length);u32(local,22,data.length);u16(local,26,name.length);u16(local,28,0);local.set(name,30);
   const central=new Uint8Array(46+name.length);
-  u32(central,0,0x02014b50);u16(central,4,20);u16(central,6,20);u16(central,8,0);u16(central,10,0);
-  u32(central,16,crc);u32(central,20,data.length);u32(central,24,data.length);u16(central,28,name.length);u16(central,30,0);u16(central,32,0);
+  u32(central,0,0x02014b50);u16(central,4,20);u16(central,6,20);u16(central,8,0);u16(central,10,method);
+  u32(central,16,crc);u32(central,20,body.length);u32(central,24,data.length);u16(central,28,name.length);u16(central,30,0);u16(central,32,0);
   u32(central,38,0);u32(central,42,0);central.set(name,46);
   const eocd=new Uint8Array(22);
-  u32(eocd,0,0x06054b50);u16(eocd,8,1);u16(eocd,10,1);u32(eocd,12,central.length);u32(eocd,16,local.length+data.length);
-  return cat([local,data,central,eocd]);
+  u32(eocd,0,0x06054b50);u16(eocd,8,1);u16(eocd,10,1);u32(eocd,12,central.length);u32(eocd,16,local.length+body.length);
+  const out=cat([local,body,central,eocd]);
+  Object.defineProperty(out,"kmzStats",{value:{method:useDeflate?"deflate":"store",rawBytes:data.length,storedBytes:body.length},enumerable:false});
+  return out;
 }
 
 function findEOCD(bytes){
