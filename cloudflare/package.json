@@ -1,0 +1,17 @@
+{
+  "name": "xulyvfm-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "containers": "wrangler containers list"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "wrangler": "4.142.0"
+  }
+}
