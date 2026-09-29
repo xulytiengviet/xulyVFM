@@ -8,8 +8,10 @@ import { geoJSONToFeaturePayload, featurePayloadToGeoJSON, featurePayloadToJSON,
 import { encodeGeoCBOR, decodeGeoCBOR } from "./geocbor.js";
 import { vectorToGeoJSON, geoJSONToVector, inspectGdal, rasterConvert, rasterToGTiff, warmGdal, isGdalReady } from "./gdal-engine.js";
 import { chooseExecution } from "./execution-router.js";
-import { RUNTIME_CONFIG, backendAvailable } from "./runtime-config.js";
+import { RUNTIME_CONFIG, backendAvailable, backendHeaders, connectBackend, disconnectBackend } from "./runtime-config.js";
 
+import { createResultStore } from "./result-store.js";
+import { readBoundedStream } from "./resource-limits.js";
 import { applyOutputPolicy } from "./output-policy.js";
 import { createIdentity, exportIdentity, importIdentity, fingerprint, signOutput, verifyOutput } from "./provenance.js";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -21,6 +23,14 @@ let category="Tất cả",modalResolver=null;
 
 const te=new TextEncoder(),td=new TextDecoder();
 let signingIdentity=null, verifiedPackage=null;
+const resultStore=createResultStore({onChange:item=>{
+  $("#resultPanel").classList.toggle("hidden",!item);
+  $("#resultInfo").textContent=item?item.fileName+" · "+formatBytes(item.blob.size):"";
+  $("#saveResultAs").disabled=!("showSaveFilePicker" in window);
+},onStatus:message=>$("#resultStatus").textContent=message});
+$("#downloadResult").addEventListener("click",()=>resultStore.download());
+$("#saveResultAs").addEventListener("click",()=>resultStore.saveAs());
+$("#clearResult").addEventListener("click",()=>resultStore.clear());
 function outputMode(){return $("#outputMode").value;}
 function selectedFields(){const value=$("#cvnssFields").value.trim();return value?value.split(",").map(x=>x.trim()).filter(Boolean):null;}
 function policyPayload(payload){return applyOutputPolicy(payload,outputMode(),selectedFields());}
@@ -28,9 +38,9 @@ async function saveBytes(bytes,name,mime="application/octet-stream"){
   if(outputMode()==="signed"){
     const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes instanceof Blob?await bytes.arrayBuffer():bytes);
     const signed=await signOutput(data,{fileName:name,mime,owner:$("#ownerName").value,identity:signingIdentity});
-    return rawSaveBytes(signed,name+".vfms","application/json");
+    resultStore.set(signed,name+".vfms","application/json");return "ready";
   }
-  return rawSaveBytes(bytes,name,mime);
+  resultStore.set(bytes,name,mime);return "ready";
 }
 async function saveText(text,name,mime="application/vnd.google-earth.kml+xml"){return saveBytes(te.encode(text),name,mime);}
 function syncOutputMode(){
@@ -298,25 +308,15 @@ function responseFileName(response,fallback){
 }
 async function saveResponseStream(response,fileName){
   if(!response.body)throw new Error("Backend không trả stream dữ liệu.");
-  if(outputMode()==="signed")return saveBytes(new Uint8Array(await response.arrayBuffer()),fileName);
-  if("showSaveFilePicker" in window){
-    const ext="."+fileName.split(".").pop().toLowerCase();
-    const handle=await window.showSaveFilePicker({
-      suggestedName:fileName,
-      types:[{description:"GIS output",accept:{"application/octet-stream":[ext]}}]
-    });
-    const writable=await handle.createWritable();
-    await response.body.pipeTo(writable);
-    return;
-  }
-  const blob=await response.blob();
-  const url=URL.createObjectURL(blob),a=document.createElement("a");
-  a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),30000);
+  const size=Number(response.headers.get("Content-Length")||0);
+  if(size>RUNTIME_CONFIG.backendMaxBytes){await response.body.cancel();throw new Error("Kết quả vượt giới hạn tải vào bộ nhớ. Cần dịch vụ R2 tải trực tiếp cho file lớn.");}
+  const bytes=await readBoundedStream(response.body,RUNTIME_CONFIG.backendMaxBytes);
+  return saveBytes(bytes,fileName);
 }
+
 async function backendRequest(files,sourceId,targetId,sourceProjection,targetProjection,model="vector"){
   const form=new FormData();for(const file of files)form.append("file",file,file.name);
-  const response=await fetch(RUNTIME_CONFIG.backendEndpoint+"/v1/convert",{method:"POST",headers:{
+  const response=await fetch(RUNTIME_CONFIG.backendEndpoint+"/v1/convert",{method:"POST",redirect:"error",headers:{...backendHeaders(),
     "X-XulyVFM-Source":sourceId,"X-XulyVFM-Target":targetId,
     "X-XulyVFM-Source-CRS":sourceProjection,"X-XulyVFM-Target-CRS":targetProjection,"X-XulyVFM-Model":model
   },body:form});
@@ -365,7 +365,7 @@ async function convertViaBackend(target){
 async function runConvert(){
   if(!state.format)return;
   const target=FORMAT_MAP.get(targetFormat.value);if(!target)return;
-  const locked=[...document.querySelectorAll("#jobPanel input,#jobPanel select,#fileInput,#folderInput,#folderBtn,#createKey,#loadKey,#clearKey")];
+  const locked=[...document.querySelectorAll("#jobPanel input,#jobPanel select,#fileInput,#folderInput,#folderBtn,#createKey,#loadKey,#clearKey,#backendUrl,#backendToken,#connectBackend,#disconnectBackend")];
   const oldDisabled=locked.map(e=>e.disabled);locked.forEach(e=>e.disabled=true);
   convertBtn.disabled=true;const old=convertBtn.textContent;convertBtn.textContent="Đang xử lý…";
   try{
@@ -396,7 +396,7 @@ async function runConvert(){
       if(!approved)return;
       const t0=performance.now();
       const msg=await convertViaBackend(target);
-      setStatus(`Hoàn tất: ${msg} · ${((performance.now()-t0)/1000).toFixed(2)} s`,"good");
+      setStatus(`Đã chuyển đổi — sẵn sàng tải: ${msg} · ${((performance.now()-t0)/1000).toFixed(2)} s`,"good");
       return;
     }
 
@@ -410,8 +410,9 @@ async function runConvert(){
     const t0=performance.now();
     if(outputMode()==="cvnss"&&state.sourceIsRaster)throw new Error("Raster không có bảng thuộc tính vector để chuyển CVNSS4.0.");
     const msg=state.sourceIsRaster?await convertRaster(target):await convertVector(target);
-    setStatus(`Hoàn tất: ${msg} · ${plan.tier==="native"?"Browser native":"GDAL/WASM"} · ${((performance.now()-t0)/1000).toFixed(2)} s`,"good");
+    setStatus(`Đã chuyển đổi — sẵn sàng tải: ${msg} · ${plan.tier==="native"?"Browser native":"GDAL/WASM"} · ${((performance.now()-t0)/1000).toFixed(2)} s`,"good");
   }catch(err){
+    if(err.name==="AbortError"){setStatus("Tác vụ đã hủy. Kết quả trước đó (nếu có) vẫn được giữ.");return;}
     console.error(err);setStatus("Chuyển đổi thất bại: "+err.message,"badtext");
     await showModal({title:"Chuyển đổi thất bại",text:err.message,extra:"Kiểm tra đủ sidecar, CRS nguồn, loại geometry và giới hạn driver trình duyệt/backend."});
   }finally{locked.forEach((e,i)=>e.disabled=oldDisabled[i]);convertBtn.disabled=false;convertBtn.textContent=old;}
@@ -474,3 +475,15 @@ $("#verifyInput").addEventListener("change",async e=>{
   catch(err){$("#verifyStatus").textContent="Không xác minh được: "+err.message;}finally{e.target.value="";}
 });
 $("#extractVerified").addEventListener("click",async()=>{try{if(verifiedPackage)await rawSaveBytes(verifiedPackage.data,verifiedPackage.manifest.fileName,"application/octet-stream");}catch(e){$("#verifyStatus").textContent=e.message;}});
+
+$("#backendUrl").value=RUNTIME_CONFIG.backendEndpoint;
+for(const id of ["#backendUrl","#backendToken"])$(id).addEventListener("input",()=>{disconnectBackend();$("#backendStatus").textContent="Cấu hình đã đổi; cần kiểm tra kết nối lại.";});
+$("#connectBackend").addEventListener("click",async()=>{
+  const controls=[$("#backendUrl"),$("#backendToken"),$("#connectBackend"),$("#disconnectBackend"),convertBtn];
+  const previous=controls.map(e=>e.disabled);controls.forEach(e=>e.disabled=true);
+  $("#backendStatus").textContent="Đang kiểm tra dịch vụ và GDAL; chưa gửi file GIS…";
+  try{await connectBackend($("#backendUrl").value,$("#backendToken").value);$("#backendStatus").textContent="Đã kết nối: "+RUNTIME_CONFIG.backendEndpoint+" · GDAL sẵn sàng. Mỗi tác vụ cloud vẫn yêu cầu đồng ý gửi tệp.";}
+  catch(e){$("#backendStatus").textContent="Chưa kết nối: "+e.message+" Có thể tiếp tục xử lý cục bộ.";}
+  finally{$("#backendToken").value="";controls.forEach((e,i)=>e.disabled=previous[i]);}
+});
+$("#disconnectBackend").addEventListener("click",()=>{disconnectBackend();$("#backendToken").value="";$("#backendStatus").textContent="Đã ngắt backend và xóa mã truy cập khỏi phiên.";});

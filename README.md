@@ -128,3 +128,7 @@ Heavy conversions can be routed to an optional Cloudflare Container running nati
 ## Chế độ đầu ra 1.1
 
 Ba lựa chọn: Bình thường, CVNSS4.0 thuộc tính, và gói hash + chữ ký số `.vfms`. Xem [hướng dẫn và giới hạn](docs/OUTPUT-MODES.md). Chữ ký không mã hóa dữ liệu; danh tính chỉ được tin cậy sau khi đối chiếu khóa qua kênh độc lập.
+
+## Sửa lưu file 1.1.1
+
+Chuyển đổi xong mới chọn Tải xuống/Lưu thành; hủy lưu không mất kết quả. Có kiểm tra kết nối backend Cloudflare bằng mã truy cập riêng. Xem [triển khai và giới hạn](docs/SAVE-AND-CLOUDFLARE.md).
