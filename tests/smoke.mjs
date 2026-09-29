@@ -56,7 +56,7 @@ console.log(JSON.stringify({
 
 const kml=featurePayloadToKML(payload);
 if(!kml.includes("<name>Cầu Mỹ Thuận</name>")) throw new Error("VFM payload -> KML failed");
-const kmz=kmlToKMZ(kml);
+const kmz=await kmlToKMZ(kml);
 const extracted=await kmzToKML(kmz);
 if(!extracted.kml.includes("<name>Cầu Mỹ Thuận</name>")) throw new Error("KML -> KMZ -> KML failed");
 console.log(JSON.stringify({exchange:true,kmlBytes:new TextEncoder().encode(kml).length,kmzBytes:kmz.length,entry:extracted.entryName},null,2));
