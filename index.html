@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Total GIS Converter trên trình duyệt: VFM làm trung tâm, chuyển đổi nhiều định dạng GIS/CAD/GPS/database/raster với WGS84 và VN-2000.">
   <title>xulyVFM · Total GIS Converter</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="//cdn.jsdelivr.net">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body class="total-page">
@@ -22,7 +24,7 @@
       <div class="hero-copy">
         <span class="hero-kicker">VFM LÀM TRUNG TÂM · XỬ LÝ TRÊN TRÌNH DUYỆT</span>
         <h1>Total GIS<br><span>Converter</span></h1>
-        <p>Chuyển đổi GIS, CAD, GPS, cơ sở dữ liệu và raster trong một nơi. Dữ liệu vector đi qua mô hình VFM Feature + CVNSS4.0; raster dùng VFM Raster Profile riêng. GDAL/PROJ WebAssembly chỉ được tải khi thật sự cần.</p>
+        <p>Chuyển đổi GIS, CAD, GPS, cơ sở dữ liệu và raster trong một nơi. Dữ liệu vector đi qua mô hình VFM Feature + CVNSS4.0; raster dùng VFM Raster Profile riêng. engine GIS nâng cao tự nạp khi thật sự cần; người dùng không phải cài hay tải WASM thủ công.</p>
         <div class="hero-trust"><span>✓ Không upload server</span><span>✓ CRC32C + SHA-256 VFM</span><span>✓ WGS84 / VN-2000</span></div>
       </div>
       <div class="upload-card">
@@ -79,7 +81,7 @@
 
     <section id="matrix" class="matrix-section">
       <div class="section-head"><div><span class="section-kicker">MA TRẬN NĂNG LỰC</span><h2>Định dạng, đuôi file, loại, ghi chú</h2></div></div>
-      <div class="matrix-legend"><span class="lg native">Native</span><span class="lg wasm">GDAL/WASM</span><span class="lg blocked">Cảnh báo/không hỗ trợ</span></div>
+      <div class="matrix-legend"><span class="lg native">Native</span><span class="lg wasm">Engine tự động</span><span class="lg blocked">Cảnh báo/không hỗ trợ</span></div>
       <div class="tablewrap matrix-wrap"><table><thead><tr><th>Định dạng</th><th>Đuôi file</th><th>Loại</th><th>Engine</th><th>Đọc</th><th>Ghi</th><th>Ghi chú</th></tr></thead><tbody id="formatTable"></tbody></table></div>
     </section>
 
