@@ -78,3 +78,16 @@ export async function rasterToGTiff(files,{targetCrs="KEEP",onStatus=()=>{}}={})
   try{Gdal.close(dataset);}catch{}
   return {bytes,info};
 }
+
+
+export async function rasterConvert(files,{driver="GTiff",targetCrs="KEEP",onStatus=()=>{}}={}){
+  const {Gdal,dataset}=await openGdal(files,onStatus);
+  if(dataset.type!=="raster")throw new Error("Dataset không phải raster.");
+  let p;
+  if(targetCrs!=="KEEP")p=await Gdal.gdalwarp(dataset,["-of",driver,"-t_srs",targetCrs],"converted_raster");
+  else p=await Gdal.gdal_translate(dataset,["-of",driver],"converted_raster");
+  const bytes=await Gdal.getFileBytes(p);
+  const info=dataset.info||await Gdal.getInfo(dataset);
+  try{Gdal.close(dataset);}catch{}
+  return {bytes,info};
+}
