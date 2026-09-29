@@ -1,21 +1,25 @@
 import { Container, getRandom } from "@cloudflare/containers";
 
 interface Env {
-  GDAL_CONTAINER: DurableObjectNamespace<GdalContainer>;
+  VECTOR_CONTAINER: DurableObjectNamespace<VectorContainer>;
+  RASTER_CONTAINER: DurableObjectNamespace<RasterContainer>;
   ALLOWED_ORIGIN: string;
   MAX_STREAM_BYTES: string;
 }
 
-export class GdalContainer extends Container {
+class BaseGdalContainer extends Container {
   defaultPort = 8080;
   requiredPorts = [8080];
-  sleepAfter = "2m";
+  sleepAfter = "35s";
   enableInternet = false;
 }
+export class VectorContainer extends BaseGdalContainer {}
+export class RasterContainer extends BaseGdalContainer {}
 
-const POOL_SIZE = 3;
+const VECTOR_POOL = 3;
+const RASTER_POOL = 2;
 const METHODS = "POST,OPTIONS";
-const HEADERS = "Content-Type,X-XulyVFM-Source,X-XulyVFM-Target,X-XulyVFM-Source-CRS,X-XulyVFM-Target-CRS";
+const HEADERS = "Content-Type,X-XulyVFM-Source,X-XulyVFM-Target,X-XulyVFM-Source-CRS,X-XulyVFM-Target-CRS,X-XulyVFM-Model";
 
 function cors(env: Env) {
   return {
@@ -26,12 +30,16 @@ function cors(env: Env) {
     "Vary": "Origin"
   };
 }
-
 function json(body: unknown, status: number, env: Env) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8", ...cors(env) }
   });
+}
+function chooseModel(source: string, target: string, requested: string) {
+  if (requested === "raster" || requested === "vector") return requested;
+  if (source === "tif" || target === "tif") return "raster";
+  return "vector";
 }
 
 export default {
@@ -43,7 +51,6 @@ export default {
       if (origin && origin !== env.ALLOWED_ORIGIN) return new Response(null, { status: 403 });
       return new Response(null, { status: 204, headers: cors(env) });
     }
-
     if (url.pathname === "/health") return json({ ok: true }, 200, env);
     if (url.pathname !== "/v1/convert" || request.method !== "POST") {
       return json({ error: "not_found" }, 404, env);
@@ -58,12 +65,13 @@ export default {
       return json({
         error: "payload_too_large",
         maxBytes: max,
-        message: "File vượt ngưỡng stream không lưu. Chế độ R2 tạm không được bật mặc định."
+        message: "File vượt ngưỡng stream không lưu. R2 temporary mode không được bật mặc định."
       }, 413, env);
     }
 
-    const source = request.headers.get("X-XulyVFM-Source") || "";
-    const target = request.headers.get("X-XulyVFM-Target") || "";
+    const source = (request.headers.get("X-XulyVFM-Source") || "").toLowerCase();
+    const target = (request.headers.get("X-XulyVFM-Target") || "").toLowerCase();
+    const requestedModel = (request.headers.get("X-XulyVFM-Model") || "").toLowerCase();
     if (!/^[a-z0-9_-]{1,24}$/i.test(source) || !/^[a-z0-9_-]{1,24}$/i.test(target)) {
       return json({ error: "bad_format_id" }, 400, env);
     }
@@ -81,11 +89,16 @@ export default {
       redirect: "manual"
     });
 
-    const instance = await getRandom(env.GDAL_CONTAINER, POOL_SIZE);
+    const model = chooseModel(source, target, requestedModel);
+    const instance = model === "raster"
+      ? await getRandom(env.RASTER_CONTAINER, RASTER_POOL)
+      : await getRandom(env.VECTOR_CONTAINER, VECTOR_POOL);
+
     const response = await instance.fetch(forwarded);
     const outHeaders = new Headers(response.headers);
     Object.entries(cors(env)).forEach(([k,v]) => outHeaders.set(k,v));
     outHeaders.set("X-Request-ID", reqId);
+    outHeaders.set("X-XulyVFM-Execution", "cloudflare-container-"+model);
     outHeaders.set("Cache-Control", "no-store, private");
     return new Response(response.body, { status: response.status, headers: outHeaders });
   }
