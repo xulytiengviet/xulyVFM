@@ -3,7 +3,7 @@ import { VFM_MAGIC, PROFILE_CVNSS4_FEATURE, crc32c, sha256, utf8Bytes } from "./
 
 const HEADER=256, DIR=64, HASHREC=48, NONE=0xffffffff;
 const HF_HASH=1<<1, HF_PROF=1<<2, HF_DET=1<<5, HF_STRICT=1<<6, HF_IMMUTABLE=1<<7;
-const SF_CRITICAL=1<<0, SF_CONTENT=1<<1, SF_HOT=1<<2, SF_IMMUTABLE=1<<7;
+const SF_CRITICAL=1<<0, SF_CONTENT=1<<1, SF_HOT=1<<2, SF_COMPRESSED=1<<5, SF_IMMUTABLE=1<<7;
 
 const align=(n,a=8)=>(n+a-1)&~(a-1);
 const cat=(parts)=>{const n=parts.reduce((s,p)=>s+p.length,0),o=new Uint8Array(n);let k=0;for(const p of parts){o.set(p,k);k+=p.length;}return o;};
@@ -22,9 +22,29 @@ function dirEntry({type,flags,id,offset,storedLength,rawLength,profileId=0,versi
   d.setUint32(48,crc,true);d.setUint32(52,hashRef,true);w64(d,56,aux);return a;
 }
 
-export async function buildFeatureVFM(featurePayload){
-  const feat=utf8Bytes(JSON.stringify(featurePayload));
-  let uuid=(await sha256(feat)).slice(0,16);
+async function gzipBytes(bytes){
+  if(typeof CompressionStream==="undefined") return null;
+  const cs=new CompressionStream("gzip");
+  const readPromise=new Response(cs.readable).arrayBuffer();
+  const writer=cs.writable.getWriter();
+  await writer.write(bytes);
+  await writer.close();
+  return new Uint8Array(await readPromise);
+}
+
+export async function buildFeatureVFM(featurePayload,options={}){
+  const featRaw=utf8Bytes(JSON.stringify(featurePayload));
+  const mode=options.compression??"auto";
+  let featStored=featRaw, featCompression=0, featFlags=SF_CONTENT|SF_IMMUTABLE;
+  if(mode!=="none" && featRaw.length>=65536){
+    const gz=await gzipBytes(featRaw);
+    if(gz && (mode==="gzip" || gz.length<featRaw.length*0.97)){
+      featStored=gz;
+      featCompression=2;
+      featFlags|=SF_COMPRESSED;
+    }
+  }
+  let uuid=(await sha256(featRaw)).slice(0,16);
   if(isZero(uuid)) uuid=Uint8Array.of(1,...new Uint8Array(15));
   const meta=cbor.mapInt([
     [0,cbor.array([cbor.uint(1),cbor.uint(3)])],
@@ -33,7 +53,7 @@ export async function buildFeatureVFM(featurePayload){
     [5,cbor.uint(2)]
   ]);
   const prof=cbor.array([cbor.text(PROFILE_CVNSS4_FEATURE)]);
-  const digMeta=await sha256(meta), digProf=await sha256(prof), digFeat=await sha256(feat);
+  const digMeta=await sha256(meta), digProf=await sha256(prof), digFeat=await sha256(featRaw);
   const hashPayload=cat([hashRecord(1,1,digMeta),hashRecord(1,3,digProf),hashRecord(1,100,digFeat)]);
   const root=await sha256(hashPayload);
 
@@ -41,14 +61,14 @@ export async function buildFeatureVFM(featurePayload){
   const metaOff=align(dirOff+dirLen,64);
   const profOff=align(metaOff+meta.length,8);
   const featOff=align(profOff+prof.length,8);
-  const hashOff=align(featOff+feat.length,8);
+  const hashOff=align(featOff+featStored.length,8);
   const size=hashOff+hashPayload.length;
 
   const entries=[
     dirEntry({type:"META",flags:SF_CRITICAL|SF_CONTENT|SF_HOT|SF_IMMUTABLE,id:1,offset:metaOff,storedLength:meta.length,rawLength:meta.length,crc:crc32c(meta),hashRef:0}),
     dirEntry({type:"HASH",flags:SF_CRITICAL|SF_IMMUTABLE,id:2,offset:hashOff,storedLength:hashPayload.length,rawLength:hashPayload.length,crc:crc32c(hashPayload)}),
     dirEntry({type:"PROF",flags:SF_CRITICAL|SF_CONTENT|SF_HOT|SF_IMMUTABLE,id:3,offset:profOff,storedLength:prof.length,rawLength:prof.length,crc:crc32c(prof),hashRef:1}),
-    dirEntry({type:"FEAT",flags:SF_CONTENT|SF_IMMUTABLE,id:100,offset:featOff,storedLength:feat.length,rawLength:feat.length,profileId:1,crc:crc32c(feat),hashRef:2})
+    dirEntry({type:"FEAT",flags:featFlags,id:100,offset:featOff,storedLength:featStored.length,rawLength:featRaw.length,profileId:1,compression:featCompression,crc:crc32c(featStored),hashRef:2})
   ];
   const directory=cat(entries);
 
@@ -64,7 +84,14 @@ export async function buildFeatureVFM(featurePayload){
   d.setUint32(252,crc32c(header.slice(0,252)),true);
 
   const out=new Uint8Array(size);
-  out.set(header,0);out.set(directory,dirOff);out.set(meta,metaOff);out.set(prof,profOff);out.set(feat,featOff);out.set(hashPayload,hashOff);
+  out.set(header,0);out.set(directory,dirOff);out.set(meta,metaOff);out.set(prof,profOff);out.set(featStored,featOff);out.set(hashPayload,hashOff);
+  Object.defineProperty(out,"vfmStats",{value:{
+    rawFeatureBytes:featRaw.length,
+    storedFeatureBytes:featStored.length,
+    compressionId:featCompression,
+    compression:featCompression===2?"gzip":"none",
+    ratio:featStored.length/Math.max(1,featRaw.length)
+  },enumerable:false});
   return out;
 }
 
