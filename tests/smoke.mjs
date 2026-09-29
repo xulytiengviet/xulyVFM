@@ -4,6 +4,7 @@ import { parseVFM, PROFILE_CVNSS4_FEATURE, PROFILE_RASTER } from "../src/vfm-cor
 import { buildRasterVFM } from "../src/vfm-raster.js";
 import { encodeGeoCBOR, decodeGeoCBOR } from "../src/geocbor.js";
 import { compatibility, FORMAT_MAP } from "../src/format-registry.js";
+import { chooseExecution } from "../src/execution-router.js";
 import { featurePayloadToKML, kmlToKMZ, kmzToKML } from "../src/geo-exchange.js";
 
 const c=globalThis.CVNSSConverter;
@@ -89,3 +90,11 @@ console.log(JSON.stringify({
   rasterVfmBytes:rasterVfm.length,
   safetyGates:true
 },null,2));
+
+
+const fakeSmall=[{size:1_000_000}];
+const fakeHeavy=[{size:50_000_000}];
+if(chooseExecution({files:fakeSmall,sourceId:"geojson",targetId:"vfm"}).tier!=="native") throw new Error("Native routing failed");
+if(chooseExecution({files:fakeSmall,sourceId:"gpx",targetId:"vfm",backendAvailable:false}).tier!=="wasm") throw new Error("WASM routing failed");
+if(chooseExecution({files:fakeHeavy,sourceId:"gdb",targetId:"vfm",backendAvailable:true,backendMaxBytes:90_000_000}).tier!=="backend") throw new Error("Backend routing failed");
+if(chooseExecution({files:[{size:100_000_000}],sourceId:"gdb",targetId:"vfm",backendAvailable:true,backendMaxBytes:90_000_000}).tier!=="blocked") throw new Error("No-storage size gate failed");
