@@ -6,7 +6,7 @@ import { kmlToFeaturePayload } from "./vfm-writer.js";
 import { featurePayloadToKML, kmlToKMZ, kmzToKML, saveBytes, saveText, zipFiles } from "./geo-exchange.js";
 import { geoJSONToFeaturePayload, featurePayloadToGeoJSON, featurePayloadToJSON, parseGISJSON } from "./light-formats.js";
 import { encodeGeoCBOR, decodeGeoCBOR } from "./geocbor.js";
-import { vectorToGeoJSON, geoJSONToVector, inspectGdal, rasterConvert, rasterToGTiff } from "./gdal-engine.js";
+import { vectorToGeoJSON, geoJSONToVector, inspectGdal, rasterConvert, rasterToGTiff, warmGdal, isGdalReady } from "./gdal-engine.js";
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const input=$("#fileInput"),folderInput=$("#folderInput"),drop=$("#dropzone"),status=$("#status");
@@ -77,7 +77,7 @@ function renderFormats(){
   const rows=FORMATS.filter(f=>(category==="Tất cả"||f.group===category)&&(!q||[f.name,f.ext,f.type,f.note,f.group].join(" ").toLowerCase().includes(q)));
   $("#formatGrid").innerHTML=rows.map(f=>`
     <article class="format-card ${f.engine==="blocked"?"blocked":""}" data-format="${f.id}" data-engine="${f.engine}">
-      <div class="format-card-head"><span class="format-icon">${esc(f.id.toUpperCase().slice(0,4))}</span><span class="engine-dot">${f.engine==="native"?"Native":f.engine==="gdal"?"GDAL/WASM":"Cảnh báo"}</span></div>
+      <div class="format-card-head"><span class="format-icon">${esc(f.id.toUpperCase().slice(0,4))}</span><span class="engine-dot">${f.engine==="native"?"Native":f.engine==="gdal"?"Engine nâng cao":"Cảnh báo"}</span></div>
       <h3>${esc(f.name)}</h3><div class="ext">${esc(f.ext)}</div><p>${esc(f.note)}</p>
     </article>`).join("");
 }
@@ -88,7 +88,7 @@ function renderCategories(){
 function renderTable(){
   $("#formatTable").innerHTML=FORMATS.map(f=>`<tr>
     <td><b>${esc(f.name)}</b></td><td class="mono">${esc(f.ext)}</td><td>${esc(f.type)}</td>
-    <td><span class="engine-badge ${f.engine}">${f.engine==="native"?"Native":f.engine==="gdal"?"GDAL/WASM":"Browser block"}</span></td>
+    <td><span class="engine-badge ${f.engine}">${f.engine==="native"?"Native":f.engine==="gdal"?"Tự động":"Browser block"}</span></td>
     <td><span class="yn ${f.read?"y":"n"}">${f.read?"✓":"—"}</span></td><td><span class="yn ${f.write?"y":"n"}">${f.write?"✓":"—"}</span></td><td>${esc(f.note)}</td>
   </tr>`).join("");
 }
@@ -148,6 +148,9 @@ async function selectFiles(files){
     if(format.engine==="native"||format.id==="tif")await parseNativeSource();
     sourceName.textContent=format.name;sourceIcon.textContent=format.id.toUpperCase().slice(0,4);sourceFiles.textContent=filesText(arr);
     fillTargets();jobPanel.classList.remove("hidden");jobPanel.scrollIntoView({behavior:"smooth",block:"center"});
+    if(format.engine==="gdal"){
+      warmGdal().then(()=>{if(isGdalReady()&&state.format===format)setStatus(format.name+" đã sẵn sàng · engine chuyển đổi nâng cao đã chuẩn bị xong.","good");});
+    }
     const count=state.payload?.featureCount;
     const detail=count!=null?` · ${Number(count).toLocaleString()} feature`:state.sourceIsRaster?" · raster":"";
     setStatus(`${format.name} đã sẵn sàng${detail}. Chọn định dạng đích và CRS.`,"good");
@@ -290,7 +293,11 @@ $("#folderBtn").addEventListener("click",()=>folderInput.click());
 for(const ev of ["dragenter","dragover"])drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag")});
 for(const ev of ["dragleave","drop"])drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag")});
 drop.addEventListener("drop",e=>selectFiles(e.dataTransfer.files));
-targetFormat.addEventListener("change",syncCrsLocks);
+targetFormat.addEventListener("change",()=>{
+  syncCrsLocks();
+  const t=FORMAT_MAP.get(targetFormat.value);
+  if(t?.engine==="gdal")warmGdal();
+});
 sourceCrs.addEventListener("change",updateJobHint);
 targetCrs.addEventListener("change",updateJobHint);
 convertBtn.addEventListener("click",runConvert);
