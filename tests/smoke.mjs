@@ -1,6 +1,9 @@
 import "../assets/cvnss-converter.js";
 import { buildFeatureVFM } from "../src/vfm-writer.js";
-import { parseVFM, PROFILE_CVNSS4_FEATURE } from "../src/vfm-core.js";
+import { parseVFM, PROFILE_CVNSS4_FEATURE, PROFILE_RASTER } from "../src/vfm-core.js";
+import { buildRasterVFM } from "../src/vfm-raster.js";
+import { encodeGeoCBOR, decodeGeoCBOR } from "../src/geocbor.js";
+import { compatibility, FORMAT_MAP } from "../src/format-registry.js";
 import { featurePayloadToKML, kmlToKMZ, kmzToKML } from "../src/geo-exchange.js";
 
 const c=globalThis.CVNSSConverter;
@@ -60,3 +63,29 @@ const kmz=await kmlToKMZ(kml);
 const extracted=await kmzToKML(kmz);
 if(!extracted.kml.includes("<name>Cầu Mỹ Thuận</name>")) throw new Error("KML -> KMZ -> KML failed");
 console.log(JSON.stringify({exchange:true,kmlBytes:new TextEncoder().encode(kml).length,kmzBytes:kmz.length,entry:extracted.entryName},null,2));
+
+
+const cborBytes=encodeGeoCBOR(payload);
+const cborPayload=decodeGeoCBOR(cborBytes);
+if(cborPayload.features?.[0]?.geometry?.coordinates?.[0]!==105.905) throw new Error("GeoCBOR float round-trip failed");
+
+const fakeTiff=Uint8Array.from([0x49,0x49,0x2a,0x00,1,2,3,4,5,6,7,8]);
+const rasterVfm=await buildRasterVFM(fakeTiff,{crs:"EPSG:4326",width:1,height:1,bandCount:1});
+const parsedRaster=await parseVFM(rasterVfm);
+if(!parsedRaster.report.ok) throw new Error("Raster VFM integrity failed");
+if(parsedRaster.profiles[0]!==PROFILE_RASTER) throw new Error("Raster profile mismatch");
+if(parsedRaster.rasterAsset?.length!==fakeTiff.length) throw new Error("Raster asset round-trip failed");
+
+const noRasterVector=compatibility(FORMAT_MAP.get("tif"),FORMAT_MAP.get("shp"),{sourceIsRaster:true,targetCrs:"EPSG:4326"});
+if(noRasterVector.ok) throw new Error("Raster->vector safety gate failed");
+const noMdb=compatibility(FORMAT_MAP.get("mdb"),FORMAT_MAP.get("vfm"),{sourceIsRaster:false,targetCrs:"EPSG:4326"});
+if(noMdb.ok) throw new Error("MDB browser safety gate failed");
+const noVnGeojson=compatibility(FORMAT_MAP.get("vfm"),FORMAT_MAP.get("geojson"),{sourceIsRaster:false,targetCrs:"EPSG:4756"});
+if(noVnGeojson.ok) throw new Error("GeoJSON CRS lock failed");
+
+console.log(JSON.stringify({
+  totalGIS:true,
+  geocborBytes:cborBytes.length,
+  rasterVfmBytes:rasterVfm.length,
+  safetyGates:true
+},null,2));
