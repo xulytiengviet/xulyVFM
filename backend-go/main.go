@@ -59,6 +59,8 @@ type manifest struct {
 	DurationMS      int64    `json:"durationMs"`
 	Validation      string   `json:"validation"`
 	OutputFile      string   `json:"outputFile"`
+	InputFeatures   int64    `json:"inputFeatures,omitempty"`
+	OutputFeatures  int64    `json:"outputFeatures,omitempty"`
 	BackendRetained bool     `json:"backendRetained"`
 }
 
@@ -139,6 +141,15 @@ func convert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var inputFeatures int64
+	if !source.Raster {
+		inputFeatures, err = vectorFeatureCount(ctx, inputPath)
+		if err != nil {
+			http.Error(w, "input validation failed", http.StatusUnprocessableEntity)
+			return
+		}
+	}
+
 	var outputPath string
 	if target.Multi {
 		outputPath = filepath.Join(outRoot, "converted")
@@ -166,6 +177,20 @@ func convert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var outputFeatures int64
+	if !target.Raster {
+		outputFeatures, err = vectorFeatureCount(ctx, outputPath)
+		if err != nil {
+			http.Error(w, "output feature-count validation failed", http.StatusUnprocessableEntity)
+			return
+		}
+		if inputFeatures != outputFeatures {
+			log.Printf("request=%s feature_count_mismatch input=%d output=%d", reqID, inputFeatures, outputFeatures)
+			http.Error(w, "quality gate failed: feature count changed", http.StatusUnprocessableEntity)
+			return
+		}
+	}
+
 	finalPath := outputPath
 	downloadName := "converted." + target.Ext
 	if target.Multi || isDir(outputPath) {
@@ -188,7 +213,8 @@ func convert(w http.ResponseWriter, r *http.Request) {
 		SourceCRS: sourceCRS, TargetCRS: targetCRS,
 		InputFiles: baseNames(inputs), InputBytes: total,
 		OutputBytes: stat.Size(), DurationMS: time.Since(start).Milliseconds(),
-		Validation: "reopen-ok", OutputFile: downloadName, BackendRetained: false,
+		Validation: "reopen-ok+feature-count", OutputFile: downloadName,
+		InputFeatures: inputFeatures, OutputFeatures: outputFeatures, BackendRetained: false,
 	}
 	metaJSON, _ := json.Marshal(meta)
 
@@ -363,8 +389,15 @@ func runVector(ctx context.Context, input, output string, source, target formatS
 	if targetCRS != "" && targetCRS != "AUTO" && targetCRS != "KEEP" {
 		args = append(args, "-t_srs", targetCRS)
 	}
-	if target.Driver == "CSV" {
+	switch target.Driver {
+	case "CSV":
 		args = append(args, "-lco", "GEOMETRY=AS_WKT")
+	case "ESRI Shapefile":
+		args = append(args, "-lco", "ENCODING=UTF-8")
+	case "GeoJSON":
+		args = append(args, "-lco", "RFC7946=YES")
+	case "GPKG":
+		args = append(args, "-lco", "SPATIAL_INDEX=YES")
 	}
 	if target.Ext == "mif" {
 		args = append(args, "-lco", "FORMAT=MIF")
@@ -374,10 +407,39 @@ func runVector(ctx context.Context, input, output string, source, target formatS
 }
 
 func runRaster(ctx context.Context, input, output string, target formatSpec, targetCRS string) error {
-	if targetCRS != "" && targetCRS != "AUTO" && targetCRS != "KEEP" {
-		return command(ctx, "gdalwarp", "-of", target.Driver, "-t_srs", targetCRS, input, output)
+	common := []string{"-of", target.Driver}
+	if target.Driver == "GTiff" {
+		common = append(common, "-co", "TILED=YES", "-co", "COMPRESS=DEFLATE", "-co", "BIGTIFF=IF_SAFER", "-co", "NUM_THREADS=ALL_CPUS")
 	}
-	return command(ctx, "gdal_translate", "-of", target.Driver, input, output)
+	if targetCRS != "" && targetCRS != "AUTO" && targetCRS != "KEEP" {
+		args := append(common, "-t_srs", targetCRS, input, output)
+		return command(ctx, "gdalwarp", args...)
+	}
+	args := append(common, input, output)
+	return command(ctx, "gdal_translate", args...)
+}
+
+func vectorFeatureCount(ctx context.Context, dataset string) (int64, error) {
+	cmd := exec.CommandContext(ctx, "ogrinfo", "-ro", "-so", "-al", dataset)
+	cmd.Env = append(os.Environ(), "GDAL_VRT_ENABLE_PYTHON=NO", "CPL_DEBUG=OFF")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("ogrinfo count failed: %w", err)
+	}
+	re := regexp.MustCompile(`Feature Count:\\s*([0-9]+)`)
+	matches := re.FindAllStringSubmatch(string(out), -1)
+	if len(matches) == 0 {
+		return 0, errors.New("feature count unavailable")
+	}
+	var total int64
+	for _, m := range matches {
+		n, err := strconv.ParseInt(m[1], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		total += n
+	}
+	return total, nil
 }
 
 func validateOutput(ctx context.Context, output string, target formatSpec) error {
