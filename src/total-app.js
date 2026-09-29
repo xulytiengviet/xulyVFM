@@ -12,7 +12,7 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const input=$("#fileInput"),folderInput=$("#folderInput"),drop=$("#dropzone"),status=$("#status");
 const jobPanel=$("#jobPanel"),sourceName=$("#sourceName"),sourceFiles=$("#sourceFiles"),sourceIcon=$("#sourceIcon");
 const targetFormat=$("#targetFormat"),sourceCrs=$("#sourceCrs"),targetCrs=$("#targetCrs"),convertBtn=$("#convertBtn"),jobHint=$("#jobHint");
-let state={files:[],format:null,payload:null,vfm:null,sourceIsRaster:false,sourceKind:"unknown",preferredTarget:null};
+let state={files:[],fileList:null,format:null,payload:null,vfm:null,sourceIsRaster:false,sourceKind:"unknown",preferredTarget:null};
 let category="Tất cả",modalResolver=null;
 
 const te=new TextEncoder(),td=new TextDecoder();
@@ -142,7 +142,7 @@ async function selectFiles(files){
   if(!format){await showModal({title:"Không nhận diện được định dạng",text:"Đuôi file chưa nằm trong ma trận Total GIS Converter.",extra:"Có thể đóng gói/đổi tên đúng phần mở rộng hoặc mở issue trên GitHub để bổ sung driver."});return;}
   const pf=preflight(arr,format);
   if(!pf.ok){await showModal({title:"Thiếu thành phần dataset",text:pf.reason});return;}
-  state={files:arr,format,payload:null,vfm:null,sourceIsRaster:!!format.raster,sourceKind:format.raster?"raster":"unknown",preferredTarget:state.preferredTarget};
+  state={files:arr,fileList:files,format,payload:null,vfm:null,sourceIsRaster:!!format.raster,sourceKind:format.raster?"raster":"unknown",preferredTarget:state.preferredTarget};
   setStatus("Đang kiểm tra "+format.name+"…","busy");
   try{
     if(format.engine==="native"||format.id==="tif")await parseNativeSource();
@@ -176,7 +176,7 @@ async function transformPayload(payload,target){
 async function loadVectorPayload(target="KEEP"){
   if(state.payload)return transformPayload(state.payload,target);
   const src=declaredSourceCrs();
-  const bytes=await vectorToGeoJSON(state.files,{sourceCrs:src,targetCrs:target,onStatus:t=>setStatus(t,"busy")});
+  const bytes=await vectorToGeoJSON(state.fileList||state.files,{sourceCrs:src,targetCrs:target,onStatus:t=>setStatus(t,"busy")});
   const obj=JSON.parse(td.decode(bytes));
   const crs=target!=="KEEP"?target:(src==="AUTO"?"UNKNOWN":src);
   return geoJSONToFeaturePayload(obj,primaryName(),crs);
@@ -185,7 +185,7 @@ async function discoverUnknownType(){
   if(state.sourceKind!=="unknown")return;
   if(state.format.engine!=="gdal"){state.sourceKind="vector";return;}
   setStatus("Đang đọc metadata dataset bằng GDAL/WASM…","busy");
-  const x=await inspectGdal(state.files,t=>setStatus(t,"busy"));
+  const x=await inspectGdal(state.fileList||state.files,t=>setStatus(t,"busy"));
   state.sourceKind=x.type;state.sourceIsRaster=x.type==="raster";
   try{x.Gdal.close(x.dataset);}catch{}
 }
@@ -235,7 +235,7 @@ async function rasterSourceFiles(){
   if(state.format.id==="vfm"&&state.vfm?.rasterAsset){
     return new File([state.vfm.rasterAsset],"vfm_raster.tif",{type:"image/tiff"});
   }
-  return state.files;
+  return state.fileList||state.files;
 }
 async function convertRaster(target){
   const tc=targetCrs.value;
