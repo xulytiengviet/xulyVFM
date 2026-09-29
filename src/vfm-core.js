@@ -1,3 +1,4 @@
+import { readBoundedStream, MAX_EXPANDED_BYTES } from "./resource-limits.js";
 import { decodeCBOR } from "./cbor.js";
 
 export const VFM_MAGIC = Uint8Array.of(0x56,0x46,0x4d,0x00,0x0d,0x0a,0x1a,0x0a);
@@ -36,13 +37,13 @@ function slice(bytes,o,n,label){
 }
 async function decodeStoredSection(bytes,e){
   if(e.encryptionId!==0) throw new Error(e.type+": encryption_id "+e.encryptionId+" chưa được hỗ trợ");
+  if(e.rawLength>MAX_EXPANDED_BYTES)throw new Error("Section vượt giới hạn giải nén.");
   const stored=slice(bytes,e.offset,e.storedLength,e.type);
-  if(e.compressionId===0) return stored;
+  if(e.compressionId===0){if(stored.length!==e.rawLength)throw new Error("RAW_LENGTH_MISMATCH");return stored;}
   if(e.compressionId===2){
     if(typeof DecompressionStream==="undefined") throw new Error(e.type+": trình duyệt chưa hỗ trợ giải nén GZIP");
     const ds=new DecompressionStream("gzip");
-    const ab=await new Response(new Blob([stored]).stream().pipeThrough(ds)).arrayBuffer();
-    const raw=new Uint8Array(ab);
+    const raw=await readBoundedStream(new Blob([stored]).stream().pipeThrough(ds),Math.min(e.rawLength,MAX_EXPANDED_BYTES));
     if(raw.length!==e.rawLength) throw new Error(e.type+": RAW_LENGTH_MISMATCH");
     return raw;
   }
@@ -141,6 +142,11 @@ export async function parseVFM(arrayBuffer){
   const header=parseHeader(bytes);
   const directory=parseDirectory(bytes,header);
   const sections=new Map(directory.map(e=>[e.logicalId,e]));
+  if(sections.size!==directory.length)throw new Error("Trùng logical ID.");
+  if(directory.reduce((n,e)=>n+e.rawLength,0)>MAX_EXPANDED_BYTES)throw new Error("Tổng section vượt giới hạn giải nén.");
+  const sorted=[...directory].sort((a,b)=>a.offset-b.offset);
+  let end=header.directoryOffset+header.directoryLength;
+  for(const e of sorted){if(e.offset<end)throw new Error("Section chồng lấn.");end=e.offset+e.storedLength;}
   const report={ok:true,checks:[],warnings:[]};
 
   const check=(name,ok,detail="")=>{report.checks.push({name,ok,detail});if(!ok)report.ok=false;};

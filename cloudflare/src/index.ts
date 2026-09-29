@@ -27,6 +27,7 @@ function cors(env: Env) {
     "Access-Control-Allow-Methods": METHODS,
     "Access-Control-Allow-Headers": HEADERS,
     "Access-Control-Max-Age": "3600",
+    "Access-Control-Expose-Headers": "Content-Disposition,X-XulyVFM-Manifest,X-Request-ID",
     "Vary": "Origin"
   };
 }

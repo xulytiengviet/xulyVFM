@@ -147,8 +147,9 @@ export function kmlToFeaturePayload(xmlText,fileName="dataset.kml"){
     if(name)props.name=name;if(description)props.description=description;if(styleUrl)props.styleUrl=styleUrl;
     for(const d of p.getElementsByTagNameNS("*","Data")){
       const key=d.getAttribute("name");const v=d.getElementsByTagNameNS("*","value")[0];
-      if(key&&v)props[key]=v.textContent.trim();
+      if(key&&v)Object.defineProperty(props,key,{value:v.textContent.trim(),writable:true,enumerable:true,configurable:true});
     }
+    for(const d of p.getElementsByTagNameNS("*","SimpleData")){const key=d.getAttribute("name");if(key)Object.defineProperty(props,key,{value:d.textContent,writable:true,enumerable:true,configurable:true});}
     const geomNode=childElements(p).find(x=>["Point","LineString","Polygon","MultiGeometry"].includes(local(x)));
     const geometry=geometryFrom(geomNode);
     const cv={};for(const [k,v] of Object.entries(props))if(typeof v==="string"&&v.trim())cv[k]=cv4(v);

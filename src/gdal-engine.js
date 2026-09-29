@@ -75,12 +75,15 @@ export async function openGdal(files,onStatus){
     const msg=(opened?.errors||[]).map(x=>x.message||x).join("; ");
     throw new Error("Engine GIS không mở được dữ liệu"+(msg?": "+msg:""));
   }
+  if(opened.datasets.length>1){for(const d of opened.datasets)try{Gdal.close(d);}catch{};throw new Error("Nguồn có nhiều dataset. Hãy tách/chọn một dataset trước khi dùng cầu nối đơn lớp.");}
   return {Gdal,opened,dataset:opened.datasets[0]};
 }
 
 export async function vectorToGeoJSON(files,{sourceCrs="AUTO",targetCrs="KEEP",onStatus=()=>{}}={}){
   const {Gdal,dataset}=await openGdal(files,onStatus);
-  if(dataset.type!=="vector")throw new Error("Dataset không phải vector.");
+  if(dataset.type!=="vector"){Gdal.close(dataset);throw new Error("Dataset không phải vector.");}
+  const info=dataset.info||await Gdal.getInfo(dataset);
+  if(Array.isArray(info?.layers)&&info.layers.length>1){Gdal.close(dataset);throw new Error("Cầu nối GeoJSON chỉ hỗ trợ một layer. Hãy tách lớp trước; không tự bỏ lớp còn lại.");}
   const opts=["-f","GeoJSON"];
   if(sourceCrs!=="AUTO"&&sourceCrs!=="KEEP")opts.push("-s_srs",sourceCrs);
   if(targetCrs!=="KEEP")opts.push("-t_srs",targetCrs);
@@ -118,26 +121,32 @@ export async function inspectGdal(files,onStatus=()=>{}){
   return {Gdal,dataset,opened,info,type:dataset.type};
 }
 
-export async function rasterToGTiff(files,{targetCrs="KEEP",onStatus=()=>{}}={}){
+export async function rasterToGTiff(files,{sourceCrs="AUTO",targetCrs="KEEP",onStatus=()=>{}}={}){
   const {Gdal,dataset}=await openGdal(files,onStatus);
   if(dataset.type!=="raster")throw new Error("Dataset không phải raster.");
   let p;
-  if(targetCrs!=="KEEP")p=await Gdal.gdalwarp(dataset,["-of","GTiff","-t_srs",targetCrs],"xulyvfm_raster");
+  const sourceArgs=!["AUTO","KEEP","UNKNOWN"].includes(sourceCrs)?["-s_srs",sourceCrs]:[];
+  if(targetCrs!=="KEEP")p=await Gdal.gdalwarp(dataset,["-of","GTiff",...sourceArgs,"-t_srs",targetCrs],"xulyvfm_raster");
   else p=await Gdal.gdal_translate(dataset,["-of","GTiff"],"xulyvfm_raster");
   const bytes=await Gdal.getFileBytes(p);
-  const info=dataset.info||await Gdal.getInfo(dataset);
   try{Gdal.close(dataset);}catch{}
+  const checked=await openGdal(new File([bytes],"checked-output."+(typeof driver!=="undefined"&&driver==="GPKG"?"gpkg":"tif")),onStatus);
+  const info=checked.dataset.info||await Gdal.getInfo(checked.dataset);
+  try{checked.Gdal.close(checked.dataset);}catch{}
   return {bytes,info};
 }
 
-export async function rasterConvert(files,{driver="GTiff",targetCrs="KEEP",onStatus=()=>{}}={}){
+export async function rasterConvert(files,{driver="GTiff",sourceCrs="AUTO",targetCrs="KEEP",onStatus=()=>{}}={}){
   const {Gdal,dataset}=await openGdal(files,onStatus);
   if(dataset.type!=="raster")throw new Error("Dataset không phải raster.");
   let p;
-  if(targetCrs!=="KEEP")p=await Gdal.gdalwarp(dataset,["-of",driver,"-t_srs",targetCrs],"converted_raster");
+  const sourceArgs=!["AUTO","KEEP","UNKNOWN"].includes(sourceCrs)?["-s_srs",sourceCrs]:[];
+  if(targetCrs!=="KEEP")p=await Gdal.gdalwarp(dataset,["-of",driver,...sourceArgs,"-t_srs",targetCrs],"converted_raster");
   else p=await Gdal.gdal_translate(dataset,["-of",driver],"converted_raster");
   const bytes=await Gdal.getFileBytes(p);
-  const info=dataset.info||await Gdal.getInfo(dataset);
   try{Gdal.close(dataset);}catch{}
+  const checked=await openGdal(new File([bytes],"checked-output."+(typeof driver!=="undefined"&&driver==="GPKG"?"gpkg":"tif")),onStatus);
+  const info=checked.dataset.info||await Gdal.getInfo(checked.dataset);
+  try{checked.Gdal.close(checked.dataset);}catch{}
   return {bytes,info};
 }

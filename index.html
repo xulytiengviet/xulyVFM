@@ -25,7 +25,7 @@
         <span class="hero-kicker">VFM LÀM TRUNG TÂM · XỬ LÝ TRÊN TRÌNH DUYỆT</span>
         <h1>Total GIS<br><span>Converter</span></h1>
         <p>Chuyển đổi GIS, CAD, GPS, cơ sở dữ liệu và raster trong một nơi. Dữ liệu vector đi qua mô hình VFM Feature + CVNSS4.0; raster dùng VFM Raster Profile riêng. engine GIS nâng cao tự nạp khi thật sự cần; người dùng không phải cài hay tải WASM thủ công.</p>
-        <div class="hero-trust"><span>✓ Không upload server</span><span>✓ CRC32C + SHA-256 VFM</span><span>✓ WGS84 / VN-2000</span></div>
+        <div class="hero-trust"><span>✓ Hiển thị nơi xử lý</span><span>✓ CRC32C + SHA-256 VFM</span><span>✓ WGS84 / VN-2000</span></div>
       </div>
       <div class="upload-card">
         <label class="total-drop" id="dropzone">
@@ -37,7 +37,7 @@
         </label>
         <button class="folder-btn" id="folderBtn" type="button">Chọn thư mục .gdb</button>
         <input id="folderInput" class="hidden" type="file" webkitdirectory multiple>
-        <div class="privacy-note">Tệp được xử lý cục bộ. Một số định dạng tải GDAL WebAssembly từ CDN khi cần.</div>
+        <div class="privacy-note">Mặc định xử lý cục bộ; engine GDAL được tải khi cần. Nếu bật backend, ứng dụng sẽ hỏi trước khi gửi tệp.</div>
       </div>
     </div>
   </section>
@@ -56,10 +56,36 @@
         <label>CRS nguồn<select id="sourceCrs"><option value="AUTO">Tự nhận diện</option></select></label>
         <label>CRS đích<select id="targetCrs"></select></label>
       </div>
+      <div class="output-options">
+        <label>Chế độ đầu ra<select id="outputMode">
+          <option value="normal">1. Bình thường — Unicode, không mã hóa</option>
+          <option value="cvnss">2. Mã hóa nhẹ — biểu diễn CVNSS4.0</option>
+          <option value="signed">3. Hash + chữ ký người sở hữu</option>
+        </select></label>
+        <p id="outputModeHint" aria-live="polite"></p>
+        <label id="fieldPicker" class="hidden">Trường cần chuyển (tên cách nhau bằng dấu phẩy; để trống chọn tất cả text)<input id="cvnssFields" placeholder="name, description, ghi_chu"></label>
+        <div id="signingOptions" class="hidden">
+          <label>Tên người ký / chủ sở hữu khai báo<input id="ownerName" maxlength="160" placeholder="Nhập tên của bạn"></label>
+          <label>Mật khẩu file khóa (ít nhất 12 ký tự khi tạo)<input id="keyPassword" type="password" autocomplete="new-password"></label>
+          <button type="button" id="createKey">Tạo và lưu khóa ký</button>
+          <button type="button" id="loadKey">Nạp khóa ký</button>
+          <button type="button" id="clearKey">Gỡ khóa khỏi phiên</button>
+          <input type="file" id="keyInput" accept=".vfmkey" class="hidden">
+          <p id="keyStatus" aria-live="polite">Chưa nạp khóa. Khóa riêng không gửi lên máy chủ.</p>
+        </div>
+      </div>
       <button id="convertBtn" class="convert-main" type="button">Chuyển đổi GIS</button>
       <div id="jobHint" class="job-hint"></div>
     </section>
 
+    <section class="verify-panel">
+      <h2>Xác minh nguồn phát hành</h2>
+      <p>Gói .vfms chứa file GIS gốc, SHA-256 và chữ ký số. Chữ ký xác nhận khóa ký; tên người sở hữu do người ký khai báo.</p>
+      <label>Dấu vân tay SHA-256 của khóa tin cậy (nhận qua kênh độc lập)<input id="trustedFingerprint" placeholder="64 ký tự hex; để trống chỉ kiểm tra chữ ký"></label>
+      <label>Chọn gói đã ký<input id="verifyInput" type="file" accept=".vfms"></label>
+      <p id="verifyStatus" aria-live="polite"></p>
+      <button id="extractVerified" type="button" disabled>Tải file GIS đã xác minh</button>
+    </section>
     <section id="tools" class="tools-section">
       <div class="section-head">
         <div><span class="section-kicker">TẤT CẢ CÔNG CỤ</span><h2>Định dạng GIS trong một nơi</h2></div>
@@ -82,6 +108,7 @@
     <section id="matrix" class="matrix-section">
       <div class="section-head"><div><span class="section-kicker">MA TRẬN NĂNG LỰC</span><h2>Định dạng, đuôi file, loại, ghi chú</h2></div></div>
       <div class="matrix-legend"><span class="lg native">Native</span><span class="lg wasm">Engine tự động</span><span class="lg blocked">Cảnh báo/không hỗ trợ</span></div>
+      <p class="matrix-note">Đọc/ghi là khả năng khai báo của định dạng; driver thực tế phụ thuộc engine. Chuyển qua GeoJSON là cầu nối đơn lớp. Xem <a href="./docs/OUTPUT-MODES.md">phạm vi và giới hạn kiểm thử</a>.</p>
       <div class="tablewrap matrix-wrap"><table><thead><tr><th>Định dạng</th><th>Đuôi file</th><th>Loại</th><th>Engine</th><th>Đọc</th><th>Ghi</th><th>Ghi chú</th></tr></thead><tbody id="formatTable"></tbody></table></div>
     </section>
 

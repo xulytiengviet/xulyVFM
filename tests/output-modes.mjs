@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import '../assets/cvnss-converter.js';
+import {applyOutputPolicy} from '../src/output-policy.js';
+import {createIdentity,exportIdentity,importIdentity,signOutput,verifyOutput,fingerprint} from '../src/provenance.js';
+import {buildFeatureVFM} from '../src/vfm-writer.js';
+import {parseVFM,PROFILE_CVNSS4_FEATURE} from '../src/vfm-core.js';
+import {featurePayloadToGeoJSON} from '../src/light-formats.js';
+import {encodeGeoCBOR,decodeGeoCBOR} from '../src/geocbor.js';
+import {chooseExecution} from '../src/execution-router.js';
+import {readBoundedStream} from '../src/resource-limits.js';
+const original={schema:1,profile:PROFILE_CVNSS4_FEATURE,crs:'EPSG:4326',featureCount:1,features:[{id:'unchanged',geometry:{type:'Point',coordinates:[105.905,10.274]},properties:{name:'Cầu Mỹ Thuận',nested:{notes:['Vĩnh Long',null,42]},url:'https://example.com/Vĩnh-Long',count:17},cv4:{name:'old'}}]};
+const before=JSON.stringify(original);
+const normal=applyOutputPolicy(original,'normal');assert.equal(normal.features[0].properties.name,'Cầu Mỹ Thuận');assert.equal(normal.features[0].cv4,undefined);
+const light=applyOutputPolicy(original,'cvnss');assert.equal(light.features[0].properties.name,'Caud Mis Thalf');assert.notEqual(light.features[0].properties.nested.notes[0],'Vĩnh Long');assert.equal(light.features[0].properties.url,original.features[0].properties.url);assert.deepEqual(light.features[0].geometry,original.features[0].geometry);assert.equal(light.features[0].properties.count,17);assert.equal(JSON.stringify(original),before);
+assert.equal(applyOutputPolicy(original,'cvnss',['nested']).features[0].properties.name,'Cầu Mỹ Thuận');
+assert.equal(featurePayloadToGeoJSON(light).features[0].properties.name,'Caud Mis Thalf');assert.deepEqual(decodeGeoCBOR(encodeGeoCBOR(light)),light);
+const vfm=await buildFeatureVFM(light);assert.deepEqual((await parseVFM(vfm)).featureCollection,light);
+const identity=await createIdentity(),password='long-password-for-test';
+const protectedKey=await exportIdentity(identity,password);assert.ok(!new TextDecoder().decode(protectedKey).includes('PRIVATE KEY'));
+await assert.rejects(importIdentity(protectedKey,'wrong password'));
+const loaded=await importIdentity(protectedKey,password);assert.equal(await fingerprint(loaded.publicJwk),await fingerprint(identity.publicJwk));
+for(const [name,data] of [['dataset.vfm',vfm],['dataset.geojson',new TextEncoder().encode(JSON.stringify(featurePayloadToGeoJSON(normal)))],['dataset.cbor',encodeGeoCBOR(normal)]]){
+ const signed=await signOutput(data,{fileName:name,owner:'Test owner',identity:loaded});
+ const verified=await verifyOutput(signed);assert.deepEqual(verified.data,data);assert.equal(verified.trusted,false);
+ assert.equal((await verifyOutput(signed,await fingerprint(identity.publicJwk))).trusted,true);
+ await assert.rejects(verifyOutput(signed,'0'.repeat(64)));
+ const o=JSON.parse(new TextDecoder().decode(signed));o.manifest.owner='Impersonator';await assert.rejects(verifyOutput(new TextEncoder().encode(JSON.stringify(o))));
+ const t=JSON.parse(new TextDecoder().decode(signed));t.data=(t.data[0]==='A'?'B':'A')+t.data.slice(1);await assert.rejects(verifyOutput(new TextEncoder().encode(JSON.stringify(t))));
+}
+assert.equal(chooseExecution({files:[{size:100_000_000}],sourceId:'geojson',targetId:'vfm'}).tier,'blocked');
+assert.equal(chooseExecution({files:[{size:40_000_000}],sourceId:'e00',targetId:'vfm',backendAvailable:true}).tier,'wasm');
+await assert.rejects(readBoundedStream(new Blob([new Uint8Array(20)]).stream(),10));
+console.log('PASS: three output modes, recursive attributes, immutable geometry, signed bytes, encrypted key import, tamper/wrong-key rejection, memory gates.');

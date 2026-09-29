@@ -27,6 +27,7 @@ export function chooseExecution({
   backendMaxBytes=EXECUTION_POLICY.backendDefaultMax
 }){
   const total=[...files].reduce((n,f)=>n+(f.size||0),0);
+  if(total>backendMaxBytes)return {tier:"blocked",reason:"Dữ liệu vượt giới hạn bộ nhớ an toàn.",total};
   if(NATIVE.has(sourceId)&&NATIVE.has(targetId)){
     return {tier:"native",reason:"Cả nguồn và đích có codec native trong xulyVFM.",total};
   }
@@ -38,7 +39,9 @@ export function chooseExecution({
   if(wasmSafe){
     return {tier:"wasm",reason:"Dataset nằm trong ngưỡng bộ nhớ bảo thủ của GDAL/WASM tối giản.",total,expanded};
   }
-  if(backendAvailable&&total<=backendMaxBytes){
+  const backendSources=new Set(["vfm","kml","kmz","geojson","json","cbor","shp","dxf","dgn","gml","gpx","gpkg","gdb","tab","mif","sqlite","csv","tif"]);
+  const backendTargets=new Set(["vfm","json","cbor","kml","kmz","geojson","shp","dxf","dgn","gml","gpx","gpkg","gdb","tab","mif","sqlite","csv","tif"]);
+  if(backendAvailable&&backendSources.has(sourceId)&&backendTargets.has(targetId)&&total<=backendMaxBytes){
     return {tier:"backend",reason:"Dataset nặng/multi-file; native GDAL Container được ưu tiên để giảm RAM browser và tăng độ ổn định.",total,expanded};
   }
   if(total>backendMaxBytes){
