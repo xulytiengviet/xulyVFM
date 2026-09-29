@@ -112,3 +112,15 @@ CI kiểm tra VFM Feature, VFM Raster, GZIP FEAT, KML/KMZ round-trip, GeoCBOR v�
 ## License
 
 MIT © 2026 Long Ngo.
+
+
+## Hybrid browser + Cloudflare backend
+
+Production architecture is documented in:
+
+- [docs/HYBRID-ARCHITECTURE.md](docs/HYBRID-ARCHITECTURE.md)
+- [docs/PRIVACY-NO-STORAGE.md](docs/PRIVACY-NO-STORAGE.md)
+- [docs/CLOUDFLARE-DEPLOY.md](docs/CLOUDFLARE-DEPLOY.md)
+- [docs/CLOUDFLARE-COST.md](docs/CLOUDFLARE-COST.md)
+
+Heavy conversions can be routed to an optional Cloudflare Container running native GDAL. The default backend path uses ephemeral container disk only and does not persist user files to R2/KV/D1/DO storage.
