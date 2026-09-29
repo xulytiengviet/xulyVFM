@@ -7,6 +7,8 @@ import { featurePayloadToKML, kmlToKMZ, kmzToKML, saveBytes, saveText, zipFiles 
 import { geoJSONToFeaturePayload, featurePayloadToGeoJSON, featurePayloadToJSON, parseGISJSON } from "./light-formats.js";
 import { encodeGeoCBOR, decodeGeoCBOR } from "./geocbor.js";
 import { vectorToGeoJSON, geoJSONToVector, inspectGdal, rasterConvert, rasterToGTiff, warmGdal, isGdalReady } from "./gdal-engine.js";
+import { chooseExecution } from "./execution-router.js";
+import { RUNTIME_CONFIG, backendAvailable } from "./runtime-config.js";
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const input=$("#fileInput"),folderInput=$("#folderInput"),drop=$("#dropzone"),status=$("#status");
@@ -264,11 +266,84 @@ async function convertRaster(target){
   throw new Error("Đường chuyển raster này chưa được định nghĩa an toàn.");
 }
 
+
+function responseFileName(response,fallback){
+  const cd=response.headers.get("Content-Disposition")||"";
+  const m=cd.match(/filename="?([^";]+)"?/i);
+  return m?.[1]||fallback;
+}
+async function saveResponseStream(response,fileName){
+  if(!response.body)throw new Error("Backend không trả stream dữ liệu.");
+  if("showSaveFilePicker" in window){
+    const ext="."+fileName.split(".").pop().toLowerCase();
+    const handle=await window.showSaveFilePicker({
+      suggestedName:fileName,
+      types:[{description:"GIS output",accept:{"application/octet-stream":[ext]}}]
+    });
+    const writable=await handle.createWritable();
+    await response.body.pipeTo(writable);
+    return;
+  }
+  const blob=await response.blob();
+  const url=URL.createObjectURL(blob),a=document.createElement("a");
+  a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),30000);
+}
+async function convertViaBackend(target){
+  const endpoint=RUNTIME_CONFIG.backendEndpoint+"/v1/convert";
+  const form=new FormData();
+  for(const file of state.files)form.append("file",file,file.name);
+  const model=(state.sourceIsRaster||state.format.id==="tif"||target.id==="tif")?"raster":"vector";
+  const headers={
+    "X-XulyVFM-Source":state.format.id,
+    "X-XulyVFM-Target":target.id,
+    "X-XulyVFM-Source-CRS":declaredSourceCrs(),
+    "X-XulyVFM-Target-CRS":target.crsLocked||targetCrs.value,
+    "X-XulyVFM-Model":model
+  };
+  setStatus("Đang chuyển đổi bằng Cloudflare native GDAL…","busy");
+  const response=await fetch(endpoint,{method:"POST",headers,body:form});
+  if(!response.ok){
+    let msg="HTTP "+response.status;
+    try{msg=(await response.text())||msg;}catch{}
+    throw new Error(msg);
+  }
+  const name=responseFileName(response,baseName(primaryName())+"."+outputExt(target.id));
+  await saveResponseStream(response,name);
+  return `${target.name} · Cloudflare native GDAL · không lưu persistent`;
+}
+
 async function runConvert(){
   if(!state.format)return;
   const target=FORMAT_MAP.get(targetFormat.value);if(!target)return;
   convertBtn.disabled=true;const old=convertBtn.textContent;convertBtn.textContent="Đang xử lý…";
   try{
+    const plan=chooseExecution({
+      files:state.files,
+      sourceId:state.format.id,
+      targetId:target.id,
+      backendAvailable:backendAvailable(),
+      backendMaxBytes:RUNTIME_CONFIG.backendMaxBytes
+    });
+
+    if(plan.tier==="blocked"){
+      await showModal({title:"File vượt ngưỡng xử lý không lưu",text:plan.reason,extra:"xulyVFM không tự động đưa file lên R2. Chế độ lưu tạm cloud chỉ được bật khi người dùng đồng ý rõ ràng."});
+      return;
+    }
+
+    if(plan.tier==="backend"){
+      const cap=compatibility(state.format,target,{sourceIsRaster:state.sourceIsRaster,targetCrs:targetCrs.value});
+      if(!cap.ok){await showModal({title:"Không thể chuyển đổi an toàn",text:cap.reason,extra:"Ứng dụng chặn thao tác thay vì tạo file sai mô hình dữ liệu."});return;}
+      if(cap.level==="warning"){
+        const yes=await showModal({title:"Có thể mất một phần thông tin",text:cap.reason,extra:"Backend dùng native GDAL nhưng khác biệt mô hình dữ liệu vẫn tồn tại. Style, topology, domain, attachment hoặc schema đặc thù có thể không round-trip.",allowContinue:true,continueLabel:"Vẫn chuyển đổi"});
+        if(!yes)return;
+      }
+      const t0=performance.now();
+      const msg=await convertViaBackend(target);
+      setStatus(`Hoàn tất: ${msg} · ${((performance.now()-t0)/1000).toFixed(2)} s`,"good");
+      return;
+    }
+
     await discoverUnknownType();
     const cap=compatibility(state.format,target,{sourceIsRaster:state.sourceIsRaster,targetCrs:targetCrs.value});
     if(!cap.ok){await showModal({title:"Không thể chuyển đổi an toàn",text:cap.reason,extra:"Ứng dụng chặn thao tác thay vì tạo file sai mô hình dữ liệu."});return;}
@@ -278,10 +353,10 @@ async function runConvert(){
     }
     const t0=performance.now();
     const msg=state.sourceIsRaster?await convertRaster(target):await convertVector(target);
-    setStatus(`Hoàn tất: ${msg} · ${((performance.now()-t0)/1000).toFixed(2)} s`,"good");
+    setStatus(`Hoàn tất: ${msg} · ${plan.tier==="native"?"Browser native":"GDAL/WASM"} · ${((performance.now()-t0)/1000).toFixed(2)} s`,"good");
   }catch(err){
     console.error(err);setStatus("Chuyển đổi thất bại: "+err.message,"badtext");
-    await showModal({title:"Chuyển đổi thất bại",text:err.message,extra:"Kiểm tra đủ sidecar, CRS nguồn, loại geometry và giới hạn driver trình duyệt."});
+    await showModal({title:"Chuyển đổi thất bại",text:err.message,extra:"Kiểm tra đủ sidecar, CRS nguồn, loại geometry và giới hạn driver trình duyệt/backend."});
   }finally{convertBtn.disabled=false;convertBtn.textContent=old;}
 }
 
