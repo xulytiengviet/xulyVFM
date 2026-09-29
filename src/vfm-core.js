@@ -31,7 +31,21 @@ export async function sha256(bytes){
 }
 function slice(bytes,o,n,label){
   if(o<0||n<0||o+n>bytes.length) throw new Error((label||"range")+" nằm ngoài file");
-  return bytes.slice(o,o+n);
+  return bytes.subarray(o,o+n);
+}
+async function decodeStoredSection(bytes,e){
+  if(e.encryptionId!==0) throw new Error(e.type+": encryption_id "+e.encryptionId+" chưa được hỗ trợ");
+  const stored=slice(bytes,e.offset,e.storedLength,e.type);
+  if(e.compressionId===0) return stored;
+  if(e.compressionId===2){
+    if(typeof DecompressionStream==="undefined") throw new Error(e.type+": trình duyệt chưa hỗ trợ giải nén GZIP");
+    const ds=new DecompressionStream("gzip");
+    const ab=await new Response(new Blob([stored]).stream().pipeThrough(ds)).arrayBuffer();
+    const raw=new Uint8Array(ab);
+    if(raw.length!==e.rawLength) throw new Error(e.type+": RAW_LENGTH_MISMATCH");
+    return raw;
+  }
+  throw new Error(e.type+": compression_id "+e.compressionId+" chưa được hỗ trợ");
 }
 function fourcc(bytes,o){return String.fromCharCode(...bytes.slice(o,o+4));}
 
@@ -122,7 +136,7 @@ function jsonFriendlyCBOR(v){
 }
 
 export async function parseVFM(arrayBuffer){
-  const bytes=new Uint8Array(arrayBuffer);
+  const bytes=arrayBuffer instanceof Uint8Array?arrayBuffer:new Uint8Array(arrayBuffer);
   const header=parseHeader(bytes);
   const directory=parseDirectory(bytes,header);
   const sections=new Map(directory.map(e=>[e.logicalId,e]));
@@ -136,12 +150,14 @@ export async function parseVFM(arrayBuffer){
   const dirBytes=slice(bytes,header.directoryOffset,header.directoryLength,"Directory");
   check("Directory SHA-256",eq(await sha256(dirBytes),header.directoryDigest));
 
+  const rawSections=new Map();
   for(const e of directory){
     if(e.offset%8) {report.warnings.push(e.type+": offset không align 8"); report.ok=false;}
     const stored=slice(bytes,e.offset,e.storedLength,e.type);
     check(e.type+" CRC32C",crc32c(stored)===e.crc32c,"logical_id="+e.logicalId);
     e.chunks=parseChunks(bytes,e);
     e.profile=null;
+    if(!e.chunks.length) rawSections.set(e.logicalId,await decodeStoredSection(bytes,e));
   }
 
   const metaEntry=sections.get(1), hashEntry=sections.get(2), profEntry=sections.get(3);
@@ -149,9 +165,9 @@ export async function parseVFM(arrayBuffer){
   if(!hashEntry||hashEntry.type!=="HASH") throw new Error("Thiếu HASH logical_id=2");
   if(!profEntry||profEntry.type!=="PROF") throw new Error("Thiếu PROF logical_id=3");
 
-  const metaBytes=slice(bytes,metaEntry.offset,metaEntry.rawLength,"META");
-  const profBytes=slice(bytes,profEntry.offset,profEntry.rawLength,"PROF");
-  const hashBytes=slice(bytes,hashEntry.offset,hashEntry.rawLength,"HASH");
+  const metaBytes=rawSections.get(metaEntry.logicalId);
+  const profBytes=rawSections.get(profEntry.logicalId);
+  const hashBytes=rawSections.get(hashEntry.logicalId);
   check("Manifest SHA-256",eq(await sha256(metaBytes),header.manifestDigest));
   check("Content root SHA-256",eq(await sha256(hashBytes),header.contentRootDigest));
 
@@ -165,8 +181,8 @@ export async function parseVFM(arrayBuffer){
     if((e.flags&(1<<1)) && !(e.flags&(1<<3)) && e.compressionId===0 && e.encryptionId===0){
       const rec=hashRecords[e.hashRef];
       if(!rec){ check(e.type+" content hash",false,"hash_ref ngoài phạm vi"); continue; }
-      const raw=slice(bytes,e.offset,e.rawLength,e.type);
-      check(e.type+" content SHA-256",rec.objectKind===1 && rec.objectId===e.logicalId && eq(await sha256(raw),rec.digest),
+      const raw=rawSections.get(e.logicalId);
+      check(e.type+" content SHA-256",!!raw && rec.objectKind===1 && rec.objectId===e.logicalId && eq(await sha256(raw),rec.digest),
             "logical_id="+e.logicalId);
     }
   }
@@ -174,12 +190,12 @@ export async function parseVFM(arrayBuffer){
   const decodedSections=[];
   let featureCollection=null;
   for(const e of directory){
-    const raw=slice(bytes,e.offset,e.storedLength,e.type);
+    const raw=rawSections.get(e.logicalId)||slice(bytes,e.offset,e.storedLength,e.type);
     let decoded=null, kind="binary";
     if(e.type==="META"){decoded=jsonFriendlyCBOR(meta);kind="cbor";}
     else if(e.type==="PROF"){decoded=profiles;kind="cbor";}
     else if(e.type==="HASH"){decoded=hashRecords.map(r=>({...r,digest:hex(r.digest)}));kind="hash";}
-    else if(!e.chunks.length && e.compressionId===0 && e.encryptionId===0){
+    else if(!e.chunks.length && e.encryptionId===0){
       const text=td.decode(raw);
       const trimmed=text.trim();
       if(trimmed.startsWith("{")||trimmed.startsWith("[")){
