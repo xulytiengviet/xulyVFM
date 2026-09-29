@@ -155,7 +155,7 @@ async function convertTo(kind,button){
         await saveText(kml,base+".kml");
         setStatus(`Đã xuất ${base}.kml · ${allFeatures.length.toLocaleString()} feature`,"good");
       }else{
-        const kmz=kmlToKMZ(kml);await saveBytes(kmz,base+".kmz","application/vnd.google-earth.kmz");
+        const kmz=await kmlToKMZ(kml);await saveBytes(kmz,base+".kmz","application/vnd.google-earth.kmz");
         setStatus(`Đã xuất ${base}.kmz · ${formatBytes(kmz.length)}`,"good");
       }
     }
