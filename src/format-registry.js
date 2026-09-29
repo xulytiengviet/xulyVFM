@@ -71,7 +71,7 @@ export function compatibility(source,target,{sourceIsRaster=false,targetCrs="KEE
   if(sourceIsRaster && !targetRaster && target.id!=="vfm" && target.id!=="gpkg"){
     return {ok:false,level:"error",reason:"Nguồn là raster nhưng đích là vector. Cần một phép vector hóa/polygonize có tham số; Total GIS Converter không tự suy đoán phép toán này."};
   }
-  if(!sourceIsRaster && targetRaster && source.id!=="vfm"){
+  if(!sourceIsRaster && targetRaster){
     return {ok:false,level:"error",reason:"Nguồn là vector nhưng đích là raster. Cần rasterization (độ phân giải, extent, thuộc tính burn); không thể bảo toàn dữ liệu bằng chuyển định dạng thuần túy."};
   }
   const warns=[];
