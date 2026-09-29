@@ -128,7 +128,11 @@ func convert(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
 	defer cancel()
 
-	inputPath := choosePrimary(inputs, sourceID)
+	inputPath, err := prepareInput(inputs, sourceID, work)
+	if err != nil {
+		http.Error(w, "input preparation failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 	outRoot := filepath.Join(work, "out")
 	if err := os.MkdirAll(outRoot, 0o700); err != nil {
 		http.Error(w, "output directory failed", 500)
@@ -245,11 +249,95 @@ func saveMultipart(r *http.Request, dir string) ([]string, int64, error) {
 			return nil, total, closeErr
 		}
 		total += n
+		if total > 100_000_000 {
+			return nil, total, errors.New("input exceeds container safety limit")
+		}
 		paths = append(paths, p)
 	}
 	r.MultipartForm = &multipart.Form{Value: map[string][]string{}, File: map[string][]*multipart.FileHeader{}}
 	_ = maxMemory
 	return paths, total, nil
+}
+
+func prepareInput(paths []string, id, work string) (string, error) {
+	if id != "gdb" {
+		return choosePrimary(paths, id), nil
+	}
+	gdbDir := filepath.Join(work, "source.gdb")
+	if err := os.MkdirAll(gdbDir, 0o700); err != nil {
+		return "", err
+	}
+	if len(paths) == 1 && strings.EqualFold(filepath.Ext(paths[0]), ".zip") {
+		if err := unzipGDB(paths[0], gdbDir); err != nil {
+			return "", err
+		}
+		return gdbDir, nil
+	}
+	for _, p := range paths {
+		dst := filepath.Join(gdbDir, filepath.Base(p))
+		if err := copyFile(p, dst); err != nil {
+			return "", err
+		}
+	}
+	return gdbDir, nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
+func unzipGDB(zipPath, dst string) error {
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	for _, zf := range zr.File {
+		if zf.FileInfo().IsDir() {
+			continue
+		}
+		name := filepath.Clean(zf.Name)
+		if strings.Contains(name, "..") {
+			return errors.New("unsafe zip path")
+		}
+		base := filepath.Base(name)
+		if base == "." || base == "" {
+			continue
+		}
+		rc, err := zf.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.OpenFile(filepath.Join(dst, base), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, copyErr := io.Copy(out, rc)
+		closeErr := out.Close()
+		rc.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
 }
 
 func choosePrimary(paths []string, id string) string {
