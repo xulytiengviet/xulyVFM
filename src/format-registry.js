@@ -75,6 +75,10 @@ export function compatibility(source,target,{sourceIsRaster=false,targetCrs="KEE
     return {ok:false,level:"error",reason:"Nguồn là vector nhưng đích là raster. Cần rasterization (độ phân giải, extent, thuộc tính burn); không thể bảo toàn dữ liệu bằng chuyển định dạng thuần túy."};
   }
   const warns=[];
+  if(source.id==="kmz" && target.id!=="kmz")warns.push("KMZ có thể chứa icon, ảnh, overlay và model; bridge hiện chuyển geometry/attributes và không đảm bảo bảo toàn toàn bộ asset.");
+  if(source.id==="gdb" && target.id!=="gdb")warns.push("FileGDB có thể có domain, subtype, relationship, topology và attachment; bridge Simple Features không bảo toàn mọi cấu trúc ESRI.");
+  if(source.id==="gpkg" && !["gpkg","vfm"].includes(target.id))warns.push("GeoPackage có thể có nhiều layer/raster/extension; chuyển sang định dạng đơn lớp có thể chỉ giữ phần Simple Features được engine mở.");
+  if(["dxf","dgn"].includes(source.id) && !["dxf","dgn","vfm"].includes(target.id))warns.push("CAD có thể có block/style/level/entity không ánh xạ 1:1 sang Simple Features.");
   if(target.id==="dxf")warns.push("DXF không bảo toàn CRS metadata; chỉ tọa độ sau biến đổi được ghi.");
   if(target.id==="shp")warns.push("Shapefile có giới hạn DBF/kiểu trường và là định dạng nhiều file; kết quả được đóng ZIP.");
   if(target.id==="csv"||target.id==="txt")warns.push("Bảng text không có mô hình geometry đầy đủ; geometry sẽ ưu tiên WKT.");
