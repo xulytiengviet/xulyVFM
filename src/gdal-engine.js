@@ -52,7 +52,11 @@ export async function geoJSONToVector(file,{driver,sourceCrs="EPSG:4326",targetC
   const paths=p?.all?.length?p.all.map(x=>x.local):[p.local||p];
   const outputs=[];
   for(const path of paths){
-    try{outputs.push({name:path.split("/").pop(),bytes:await Gdal.getFileBytes(path)});}catch{}
+    try{
+      const marker="converted.gdb/",i=path.indexOf(marker);
+      const name=i>=0?path.slice(i):path.split("/").pop();
+      outputs.push({name,bytes:await Gdal.getFileBytes(path)});
+    }catch{}
   }
   try{Gdal.close(dataset);}catch{}
   if(!outputs.length)throw new Error("GDAL không tạo file đầu ra.");
