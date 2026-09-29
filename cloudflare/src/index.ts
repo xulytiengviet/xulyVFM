@@ -5,6 +5,7 @@ interface Env {
   RASTER_CONTAINER: DurableObjectNamespace<RasterContainer>;
   ALLOWED_ORIGIN: string;
   MAX_STREAM_BYTES: string;
+  BACKEND_TOKEN: string;
 }
 
 class BaseGdalContainer extends Container {
@@ -18,8 +19,8 @@ export class RasterContainer extends BaseGdalContainer {}
 
 const VECTOR_POOL = 3;
 const RASTER_POOL = 2;
-const METHODS = "POST,OPTIONS";
-const HEADERS = "Content-Type,X-XulyVFM-Source,X-XulyVFM-Target,X-XulyVFM-Source-CRS,X-XulyVFM-Target-CRS,X-XulyVFM-Model";
+const METHODS = "GET,POST,OPTIONS";
+const HEADERS = "Authorization,Content-Type,X-XulyVFM-Source,X-XulyVFM-Target,X-XulyVFM-Source-CRS,X-XulyVFM-Target-CRS,X-XulyVFM-Model";
 
 function cors(env: Env) {
   return {
@@ -52,7 +53,18 @@ export default {
       if (origin && origin !== env.ALLOWED_ORIGIN) return new Response(null, { status: 403 });
       return new Response(null, { status: 204, headers: cors(env) });
     }
-    if (url.pathname === "/health") return json({ ok: true }, 200, env);
+    if (origin && origin !== env.ALLOWED_ORIGIN) return json({ error: "origin_not_allowed" }, 403, env);
+    // Fail closed. This token is a backend credential, never a Cloudflare API token.
+    if (!env.BACKEND_TOKEN || env.BACKEND_TOKEN.length < 32) return json({ error: "backend_auth_not_configured" }, 503, env);
+    if (request.headers.get("Authorization") !== "Bearer " + env.BACKEND_TOKEN) return json({ error: "unauthorized" }, 401, env);
+    if (url.pathname === "/health" && request.method === "GET") {
+      try {
+        const instance = await getRandom(env.VECTOR_CONTAINER, VECTOR_POOL);
+        const response = await instance.fetch(new Request(new URL("/health", request.url)));
+        const health = await response.json() as { ok?: boolean; gdal?: boolean };
+        return json({ service: "xulyVFM", ok: response.ok && health.ok === true, gdal: health.gdal === true, maxBytes: Number(env.MAX_STREAM_BYTES || 90_000_000), storage: "temporary-container" }, response.ok ? 200 : 503, env);
+      } catch { return json({ service: "xulyVFM", ok: false, gdal: false }, 503, env); }
+    }
     if (url.pathname !== "/v1/convert" || request.method !== "POST") {
       return json({ error: "not_found" }, 404, env);
     }
@@ -95,7 +107,9 @@ export default {
       ? await getRandom(env.RASTER_CONTAINER, RASTER_POOL)
       : await getRandom(env.VECTOR_CONTAINER, VECTOR_POOL);
 
-    const response = await instance.fetch(forwarded);
+    let response: Response;
+    try { response = await instance.fetch(forwarded); }
+    catch { return json({ error: "gdal_backend_unavailable", requestId: reqId }, 503, env); }
     const outHeaders = new Headers(response.headers);
     Object.entries(cors(env)).forEach(([k,v]) => outHeaders.set(k,v));
     outHeaders.set("X-Request-ID", reqId);

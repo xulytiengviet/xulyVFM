@@ -68,7 +68,13 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"ok":true}`)
+		_, vectorErr := exec.LookPath("ogr2ogr")
+		_, rasterErr := exec.LookPath("gdalwarp")
+		ready := vectorErr == nil && rasterErr == nil
+		if !ready {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": ready, "gdal": ready})
 	})
 	mux.HandleFunc("/v1/convert", convert)
 	srv := &http.Server{

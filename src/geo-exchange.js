@@ -135,11 +135,6 @@ export async function kmzToKML(input){
 }
 
 export async function saveBytes(bytes,fileName,mime="application/octet-stream"){
-  if("showSaveFilePicker" in window){
-    const ext="."+fileName.split(".").pop().toLowerCase();
-    const handle=await window.showSaveFilePicker({suggestedName:fileName,types:[{description:"Tệp "+ext.toUpperCase(),accept:{[mime]:[ext]}}]});
-    const writable=await handle.createWritable();await writable.write(bytes);await writable.close();return "direct";
-  }
   const blob=bytes instanceof Blob?bytes:new Blob([bytes],{type:mime});
   const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);return "browser";
 }

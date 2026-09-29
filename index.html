@@ -78,6 +78,14 @@
       <div id="jobHint" class="job-hint"></div>
     </section>
 
+    <section id="resultPanel" class="verify-panel hidden" aria-labelledby="resultTitle">
+      <h2 id="resultTitle">Kết quả chuyển đổi</h2>
+      <p id="resultInfo"></p><p id="resultStatus" role="status" aria-live="polite"></p>
+      <button id="downloadResult" type="button">Tải xuống thông thường</button>
+      <button id="saveResultAs" type="button">Lưu thành…</button>
+      <button id="clearResult" type="button">Xóa kết quả</button>
+      <p>Kết quả được giữ trong bộ nhớ của tab cho đến khi xóa, chuyển đổi thành công file mới hoặc đóng/tải lại trang. Hủy lưu không làm mất kết quả.</p>
+    </section>
     <section class="verify-panel">
       <h2>Xác minh nguồn phát hành</h2>
       <p>Gói .vfms chứa file GIS gốc, SHA-256 và chữ ký số. Chữ ký xác nhận khóa ký; tên người sở hữu do người ký khai báo.</p>
@@ -85,6 +93,15 @@
       <label>Chọn gói đã ký<input id="verifyInput" type="file" accept=".vfms"></label>
       <p id="verifyStatus" aria-live="polite"></p>
       <button id="extractVerified" type="button" disabled>Tải file GIS đã xác minh</button>
+    </section>
+    <section class="verify-panel" aria-labelledby="cloudTitle">
+      <h2 id="cloudTitle">Xử lý bằng Cloudflare</h2>
+      <p>Mặc định chạy trên trình duyệt. Chỉ bật backend khi kết nối thành công và bạn đồng ý gửi file. Mã truy cập chỉ giữ trong phiên.</p>
+      <label>URL backend HTTPS<input id="backendUrl" type="url" placeholder="https://backend-cua-ban.workers.dev" autocomplete="off"></label>
+      <label>Mã truy cập xulyVFM backend (không phải Cloudflare API token)<input id="backendToken" type="password" autocomplete="off"></label>
+      <button id="connectBackend" type="button">Kiểm tra và kết nối</button>
+      <button id="disconnectBackend" type="button">Ngắt kết nối</button>
+      <p id="backendStatus" role="status" aria-live="polite">Chưa kết nối. Không có file nào được gửi tới Cloudflare.</p>
     </section>
     <section id="tools" class="tools-section">
       <div class="section-head">

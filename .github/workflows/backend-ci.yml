@@ -31,3 +31,15 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go build -trimpath ./...
+  worker-build:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx wrangler deploy --dry-run
