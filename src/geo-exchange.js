@@ -143,3 +143,21 @@ export async function saveBytes(bytes,fileName,mime="application/octet-stream"){
 export async function saveText(text,fileName,mime="application/vnd.google-earth.kml+xml"){
   return saveBytes(te.encode(text),fileName,mime);
 }
+
+
+export async function zipFiles(entries,{compress=true}={}){
+  const locals=[],centrals=[];let offset=0;
+  for(const e of entries){
+    const name=te.encode(e.name.replace(/\\/g,"/")),data=e.bytes instanceof Uint8Array?e.bytes:new Uint8Array(e.bytes),crc=crc32(data);
+    const deflated=compress?await deflateRawBytes(data):null,use=!!deflated&&deflated.length<data.length,body=use?deflated:data,method=use?8:0;
+    const local=new Uint8Array(30+name.length);
+    u32(local,0,0x04034b50);u16(local,4,20);u16(local,6,0);u16(local,8,method);u32(local,14,crc);u32(local,18,body.length);u32(local,22,data.length);u16(local,26,name.length);local.set(name,30);
+    locals.push(local,body);
+    const central=new Uint8Array(46+name.length);
+    u32(central,0,0x02014b50);u16(central,4,20);u16(central,6,20);u16(central,8,0);u16(central,10,method);u32(central,16,crc);u32(central,20,body.length);u32(central,24,data.length);u16(central,28,name.length);u32(central,42,offset);central.set(name,46);
+    centrals.push(central);offset+=local.length+body.length;
+  }
+  const centralBlock=cat(centrals),eocd=new Uint8Array(22);
+  u32(eocd,0,0x06054b50);u16(eocd,8,entries.length);u16(eocd,10,entries.length);u32(eocd,12,centralBlock.length);u32(eocd,16,offset);
+  return cat([...locals,centralBlock,eocd]);
+}
