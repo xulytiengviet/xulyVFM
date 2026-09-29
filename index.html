@@ -3,79 +3,108 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Chuyển đổi VFM, KML và KMZ hai chiều ngay trên trình duyệt, kèm kiểm tra VFM Core 1.3 và CVNSS4.0.">
-  <title>xulyVFM — VFM ↔ KML/KMZ</title>
+  <meta name="description" content="Total GIS Converter trên trình duyệt: VFM làm trung tâm, chuyển đổi nhiều định dạng GIS/CAD/GPS/database/raster với WGS84 và VN-2000.">
+  <title>xulyVFM · Total GIS Converter</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
-<body>
-<div class="shell">
-  <header class="topbar">
-    <div class="brand"><div class="mark">VF</div><div><h1>xulyVFM</h1><p>VFM ↔ KML/KMZ · chạy hoàn toàn trên trình duyệt</p></div></div>
-    <div class="badge">Không tải dữ liệu lên server</div>
-  </header>
+<body class="total-page">
+<header class="total-header">
+  <div class="total-wrap header-inner">
+    <a class="total-brand" href="./"><span class="brand-box">VF</span><span><b>xulyVFM</b><small>Total GIS Converter</small></span></a>
+    <nav><a href="#tools">Định dạng</a><a href="#matrix">Ma trận</a><a href="https://github.com/xulytiengviet/xulyVFM">GitHub</a></nav>
+    <div class="license-chip">MIT · Long Ngo phát triển</div>
+  </div>
+</header>
 
-  <section class="workspace panel">
-    <div class="workspace-copy">
-      <span class="eyebrow">BỘ CHUYỂN ĐỔI DỮ LIỆU ĐỊA LÝ</span>
-      <h2>Một trang. Hai chiều.<br><span>VFM ↔ KML / KMZ</span></h2>
-      <p>Tự nhận diện định dạng, chuyển đổi cục bộ, giữ geometry và thuộc tính Unicode. Khi tạo VFM, text được bổ sung khóa CVNSS4.0 và FEAT tự nén GZIP theo VFM Core 1.3.</p>
-      <div class="format-row"><span>VFM 1.3</span><b>↔</b><span>KML 2.2</span><b>↔</b><span>KMZ</span></div>
+<main>
+  <section class="total-hero">
+    <div class="total-wrap hero-inner">
+      <div class="hero-copy">
+        <span class="hero-kicker">VFM LÀM TRUNG TÂM · XỬ LÝ TRÊN TRÌNH DUYỆT</span>
+        <h1>Total GIS<br><span>Converter</span></h1>
+        <p>Chuyển đổi GIS, CAD, GPS, cơ sở dữ liệu và raster trong một nơi. Dữ liệu vector đi qua mô hình VFM Feature + CVNSS4.0; raster dùng VFM Raster Profile riêng. GDAL/PROJ WebAssembly chỉ được tải khi thật sự cần.</p>
+        <div class="hero-trust"><span>✓ Không upload server</span><span>✓ CRC32C + SHA-256 VFM</span><span>✓ WGS84 / VN-2000</span></div>
+      </div>
+      <div class="upload-card">
+        <label class="total-drop" id="dropzone">
+          <input id="fileInput" type="file" multiple>
+          <div class="drop-icon">＋</div>
+          <strong>Chọn tệp GIS</strong>
+          <span>hoặc kéo và thả vào đây</span>
+          <small>VFM, DXF, DGN, KML/KMZ, SHP, GeoJSON, GPX, GML, GPKG, TAB, MIF/MID, E00, SQLite, GeoTIFF, CSV, CBOR…</small>
+        </label>
+        <button class="folder-btn" id="folderBtn" type="button">Chọn thư mục .gdb</button>
+        <input id="folderInput" class="hidden" type="file" webkitdirectory multiple>
+        <div class="privacy-note">Tệp được xử lý cục bộ. Một số định dạng tải GDAL WebAssembly từ CDN khi cần.</div>
+      </div>
     </div>
-    <label class="dropzone mega" id="dropzone">
-      <input id="fileInput" type="file" accept=".vfm,.kml,.kmz,application/octet-stream,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz">
-      <div class="upload-icon">⇧</div>
-      <strong>Thả file vào đây</strong>
-      <span>hoặc bấm để chọn .vfm · .kml · .kmz</span>
-      <small>Tự nhận diện định dạng và mở các lựa chọn chuyển đổi phù hợp</small>
-    </label>
   </section>
 
-  <div class="statusbar" id="status">Sẵn sàng. Chọn một file để bắt đầu.</div>
+  <div class="total-wrap">
+    <div id="status" class="total-status">Sẵn sàng. Chọn một hay nhiều file để bắt đầu.</div>
 
-  <section id="convertPanel" class="panel hidden conversion-panel">
-    <div class="flow-head">
-      <div><div class="k">Nguồn</div><div class="file-pill" id="sourcePill">—</div></div>
-      <div class="flow-arrow">→</div>
-      <div class="target-wrap"><div class="k">Xuất ra</div><div class="action-row" id="actions"></div></div>
-    </div>
-    <div class="metrics" id="metrics"></div>
-  </section>
-
-  <main id="result" class="hidden">
-    <section class="panel inspector">
-      <div class="inspector-head">
-        <div><span class="eyebrow">XEM & KIỂM TRA</span><h3 id="inspectTitle">Dữ liệu</h3></div>
-        <button class="btn secondary" id="resetBtn">Đổi file khác</button>
+    <section id="jobPanel" class="job-panel hidden">
+      <div class="job-source">
+        <div class="job-label">Nguồn</div>
+        <div class="source-format"><span id="sourceIcon">GIS</span><div><b id="sourceName">—</b><small id="sourceFiles">—</small></div></div>
       </div>
-      <nav class="tabs" id="tabs">
-        <button class="tab active" data-tab="overview">Tổng quan</button>
-        <button class="tab vfm-only" data-tab="sections">VFM Sections</button>
-        <button class="tab" data-tab="features">Đối tượng</button>
-        <button class="tab" data-tab="text">Text · CVNSS4.0</button>
-        <button class="tab" data-tab="raw">Raw</button>
-      </nav>
-
-      <div class="tabpane" data-pane="overview">
-        <div class="grid2">
-          <div><h3 class="section-title">Trạng thái</h3><div id="checks" class="checklist"></div></div>
-          <div><h3 class="section-title">Profile / định dạng</h3><div id="profiles" class="chips"></div><h3 class="section-title" style="margin-top:20px">Xem nhanh hình học</h3><canvas id="preview" width="800" height="420"></canvas></div>
-        </div>
+      <div class="job-arrow">→</div>
+      <div class="job-options">
+        <label>Định dạng đích<select id="targetFormat"></select></label>
+        <label>CRS nguồn<select id="sourceCrs"><option value="AUTO">Tự nhận diện</option></select></label>
+        <label>CRS đích<select id="targetCrs"></select></label>
       </div>
-      <div class="tabpane hidden" data-pane="sections"><div class="tablewrap"><table><thead><tr><th>FourCC</th><th>ID</th><th>Profile</th><th>Offset</th><th>Stored</th><th>Raw</th><th>CRC32C</th></tr></thead><tbody id="sectionsBody"></tbody></table></div></div>
-      <div class="tabpane hidden" data-pane="features"><div class="toolbar"><input class="search" id="featureSearch" placeholder="Tìm feature, tên, thuộc tính…"><span class="muted" id="featureCount"></span></div><div class="tablewrap"><table><thead><tr><th>ID</th><th>Geometry</th><th>Tên</th><th>Thuộc tính</th></tr></thead><tbody id="featuresBody"></tbody></table></div></div>
-      <div class="tabpane hidden" data-pane="text"><div class="toolbar"><input class="search" id="textSearch" placeholder="Tìm Unicode hoặc CVNSS4.0…"><span class="muted" id="textCount"></span></div><div class="tablewrap"><table><thead><tr><th>Feature</th><th>Field</th><th>Unicode</th><th>CVNSS4.0</th><th>Nguồn</th></tr></thead><tbody id="textBody"></tbody></table></div></div>
-      <div class="tabpane hidden" data-pane="raw"><pre id="raw"></pre></div>
+      <button id="convertBtn" class="convert-main" type="button">Chuyển đổi GIS</button>
+      <div id="jobHint" class="job-hint"></div>
     </section>
-  </main>
 
-  <section class="note panel">
-    <b>Nguyên tắc chuyển đổi</b>
-    <span>Unicode là dữ liệu text gốc; CVNSS4.0 là khóa dẫn xuất trong VFM. VFM → KML/KMZ xuất lại geometry và properties của profile Feature; các thành phần KMZ ngoài profile hiện tại như ảnh, icon hay model nhúng không được tái tạo tự động.</span>
-  </section>
+    <section id="tools" class="tools-section">
+      <div class="section-head">
+        <div><span class="section-kicker">TẤT CẢ CÔNG CỤ</span><h2>Định dạng GIS trong một nơi</h2></div>
+        <input id="formatSearch" class="format-search" placeholder="Tìm SHP, GeoPackage, CAD, raster…">
+      </div>
+      <div class="category-tabs" id="categoryTabs"></div>
+      <div id="formatGrid" class="format-grid"></div>
+    </section>
 
-  <footer class="footer"><span>VFM Core 1.3 · Feature + CVNSS4.0 profile</span><span><a href="https://github.com/Base27-CVNSS/VFM">Chuẩn VFM</a> · <a href="https://github.com/xulytiengviet/xulyVFM">Mã nguồn</a></span></footer>
+    <section class="crs-section">
+      <div class="crs-copy"><span class="section-kicker">HỆ TỌA ĐỘ</span><h2>Không đoán CRS</h2><p>VN-2000 được tách rõ thành địa lý EPSG:4756 và UTM 48N/49N. Hệ 3°/kinh tuyến trục địa phương phải dùng đúng EPSG/tham số cụ thể; ứng dụng không tự suy đoán theo tên tỉnh.</p></div>
+      <div class="crs-cards">
+        <div><b>WGS 84</b><span>EPSG:4326</span></div>
+        <div><b>VN-2000</b><span>EPSG:4756</span></div>
+        <div><b>VN-2000 UTM 48N</b><span>EPSG:3405</span></div>
+        <div><b>VN-2000 UTM 49N</b><span>EPSG:3406</span></div>
+      </div>
+    </section>
+
+    <section id="matrix" class="matrix-section">
+      <div class="section-head"><div><span class="section-kicker">MA TRẬN NĂNG LỰC</span><h2>Định dạng, đuôi file, loại, ghi chú</h2></div></div>
+      <div class="matrix-legend"><span class="lg native">Native</span><span class="lg wasm">GDAL/WASM</span><span class="lg blocked">Cảnh báo/không hỗ trợ</span></div>
+      <div class="tablewrap matrix-wrap"><table><thead><tr><th>Định dạng</th><th>Đuôi file</th><th>Loại</th><th>Engine</th><th>Đọc</th><th>Ghi</th><th>Ghi chú</th></tr></thead><tbody id="formatTable"></tbody></table></div>
+    </section>
+
+    <section class="principles">
+      <div><b>VFM Feature</b><span>Vector + thuộc tính + Unicode/CVNSS4.0 + CRS + integrity.</span></div>
+      <div><b>VFM Raster</b><span>Raster giữ nguyên mô hình pixel; không giả vector hóa.</span></div>
+      <div><b>Popup an toàn</b><span>Đường chuyển không bảo toàn dữ liệu sẽ nêu nguyên nhân trước khi chạy.</span></div>
+    </section>
+  </div>
+</main>
+
+<footer class="total-footer"><div class="total-wrap"><span>© 2026 Long Ngo · xulyVFM</span><span>Giấy phép MIT · VFM Core 1.3 · CVNSS4.0</span></div></footer>
+
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <button id="modalClose" class="modal-x" aria-label="Đóng">×</button>
+    <div id="modalIcon" class="modal-icon">!</div>
+    <h3 id="modalTitle">Cảnh báo chuyển đổi</h3>
+    <p id="modalText"></p>
+    <div id="modalExtra" class="modal-extra"></div>
+    <div class="modal-actions"><button id="modalCancel" class="btn secondary">Đóng</button><button id="modalContinue" class="convert-main">Tiếp tục</button></div>
+  </div>
 </div>
+
 <script src="./assets/cvnss-converter.js"></script>
-<script type="module" src="./src/app.js"></script>
+<script type="module" src="./src/total-app.js"></script>
 </body>
 </html>
