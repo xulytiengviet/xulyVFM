@@ -1,6 +1,7 @@
 import "../assets/cvnss-converter.js";
 import { buildFeatureVFM } from "../src/vfm-writer.js";
 import { parseVFM, PROFILE_CVNSS4_FEATURE } from "../src/vfm-core.js";
+import { featurePayloadToKML, kmlToKMZ, kmzToKML } from "../src/geo-exchange.js";
 
 const c=globalThis.CVNSSConverter;
 if(!c) throw new Error("CVNSSConverter not loaded");
@@ -51,3 +52,11 @@ console.log(JSON.stringify({
   ratio:bigBytes.vfmStats.ratio,
   vfmBytes:bigBytes.length
 },null,2));
+
+
+const kml=featurePayloadToKML(payload);
+if(!kml.includes("<name>Cầu Mỹ Thuận</name>")) throw new Error("VFM payload -> KML failed");
+const kmz=kmlToKMZ(kml);
+const extracted=await kmzToKML(kmz);
+if(!extracted.kml.includes("<name>Cầu Mỹ Thuận</name>")) throw new Error("KML -> KMZ -> KML failed");
+console.log(JSON.stringify({exchange:true,kmlBytes:new TextEncoder().encode(kml).length,kmzBytes:kmz.length,entry:extracted.entryName},null,2));
