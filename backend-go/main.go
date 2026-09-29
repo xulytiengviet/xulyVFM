@@ -426,8 +426,12 @@ func vectorFeatureCount(ctx context.Context, dataset string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("ogrinfo count failed: %w", err)
 	}
+	return parseFeatureCount(string(out))
+}
+
+func parseFeatureCount(text string) (int64, error) {
 	re := regexp.MustCompile(`Feature Count:\s*([0-9]+)`)
-	matches := re.FindAllStringSubmatch(string(out), -1)
+	matches := re.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 {
 		return 0, errors.New("feature count unavailable")
 	}
