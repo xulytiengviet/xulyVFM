@@ -25,3 +25,29 @@ if(!v.report.ok) throw new Error("VFM integrity failed: "+JSON.stringify(v.repor
 if(v.profiles[0]!==PROFILE_CVNSS4_FEATURE) throw new Error("Profile mismatch");
 if(v.featureCollection?.features?.[0]?.properties?.name!==name) throw new Error("Feature decode mismatch");
 console.log(JSON.stringify({ok:true,size:bytes.length,version:v.summary.version,profile:v.profiles[0],cv4:v.featureCollection.features[0].cv4.name},null,2));
+
+
+const bigText="Đường giao thông và dữ liệu địa lý Việt Nam ".repeat(4000);
+const bigPayload={
+  schema:1,profile:PROFILE_CVNSS4_FEATURE,crs:"OGC:CRS84",
+  source:{format:"smoke-large",fileName:"large.kml"},
+  featureCount:50,
+  features:Array.from({length:50},(_,i)=>({
+    id:"vfm:test:big:"+i,
+    geometry:{type:"LineString",coordinates:Array.from({length:40},(_,j)=>[105+i*0.001+j*0.00001,10+j*0.00001])},
+    properties:{name:"Đối tượng "+i,description:bigText},
+    cv4:{name:c.fromCqn("Đối tượng "+i).cvss}
+  }))
+};
+const bigBytes=await buildFeatureVFM(bigPayload);
+if(bigBytes.vfmStats?.compressionId!==2) throw new Error("Large FEAT did not use GZIP");
+const bigV=await parseVFM(bigBytes);
+if(!bigV.report.ok) throw new Error("Compressed VFM integrity failed: "+JSON.stringify(bigV.report));
+if(bigV.featureCollection?.features?.length!==50) throw new Error("Compressed FEAT decode mismatch");
+console.log(JSON.stringify({
+  compressed:true,
+  rawFeatureBytes:bigBytes.vfmStats.rawFeatureBytes,
+  storedFeatureBytes:bigBytes.vfmStats.storedFeatureBytes,
+  ratio:bigBytes.vfmStats.ratio,
+  vfmBytes:bigBytes.length
+},null,2));
