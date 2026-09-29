@@ -2,6 +2,7 @@ import { decodeCBOR } from "./cbor.js";
 
 export const VFM_MAGIC = Uint8Array.of(0x56,0x46,0x4d,0x00,0x0d,0x0a,0x1a,0x0a);
 export const PROFILE_CVNSS4_FEATURE = "org.xulytiengviet.vfm.feature-cvnss4/1";
+export const PROFILE_RASTER = "org.xulytiengviet.vfm.raster/1";
 const td = new TextDecoder();
 const te = new TextEncoder();
 
@@ -188,7 +189,7 @@ export async function parseVFM(arrayBuffer){
   }
 
   const decodedSections=[];
-  let featureCollection=null;
+  let featureCollection=null, rasterInfo=null, rasterAsset=null;
   for(const e of directory){
     const raw=rawSections.get(e.logicalId)||slice(bytes,e.offset,e.storedLength,e.type);
     let decoded=null, kind="binary";
@@ -206,13 +207,15 @@ export async function parseVFM(arrayBuffer){
     if(e.profile===PROFILE_CVNSS4_FEATURE && e.type==="FEAT" && decoded && typeof decoded==="object"){
       featureCollection=decoded;
     }
+    if(e.profile===PROFILE_RASTER && e.type==="RINF" && decoded && typeof decoded==="object") rasterInfo=decoded;
+    if(e.profile===PROFILE_RASTER && e.type==="RAST") rasterAsset=raw;
     decodedSections.push({entry:e,kind,decoded,bytePreview:hex(raw.slice(0,64))});
   }
 
   return {
     bytes, header, directory, meta:jsonFriendlyCBOR(meta), profiles,
     hashRecords:hashRecords.map(r=>({...r,digest:hex(r.digest)})),
-    decodedSections, featureCollection, report,
+    decodedSections, featureCollection, rasterInfo, rasterAsset, report,
     summary:{size:bytes.length,uuid:hex(header.datasetUUID),version:header.formatMajor+"."+header.formatMinor}
   };
 }
