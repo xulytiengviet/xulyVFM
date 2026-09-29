@@ -6,27 +6,30 @@
   "compatibility_flags": ["nodejs_compat"],
   "containers": [
     {
-      "class_name": "GdalContainer",
+      "class_name": "VectorContainer",
       "image": "../backend-go/Dockerfile",
       "instance_type": "standard-2",
       "max_instances": 3,
-      "constraints": {
-        "regions": ["APAC"]
-      }
+      "constraints": { "regions": ["APAC"] }
+    },
+    {
+      "class_name": "RasterContainer",
+      "image": "../backend-go/Dockerfile",
+      "instance_type": "standard-3",
+      "max_instances": 2,
+      "constraints": { "regions": ["APAC"] }
     }
   ],
   "durable_objects": {
     "bindings": [
-      {
-        "name": "GDAL_CONTAINER",
-        "class_name": "GdalContainer"
-      }
+      { "name": "VECTOR_CONTAINER", "class_name": "VectorContainer" },
+      { "name": "RASTER_CONTAINER", "class_name": "RasterContainer" }
     ]
   },
   "migrations": [
     {
-      "tag": "v1",
-      "new_sqlite_classes": ["GdalContainer"]
+      "tag": "v2",
+      "new_sqlite_classes": ["VectorContainer", "RasterContainer"]
     }
   ],
   "vars": {
