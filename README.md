@@ -2,7 +2,7 @@
 
 **Long Ngo phát triển · MIT License**
 
-xulyVFM là bộ chuyển đổi GIS chạy trên trình duyệt, lấy **VFM** làm định dạng trung tâm. Ứng dụng kết hợp engine native nhẹ cho VFM/KML/KMZ/GeoJSON/JSON/GeoCBOR với **GDAL/PROJ WebAssembly tải theo nhu cầu** cho các định dạng GIS/CAD/database/raster nặng.
+xulyVFM là bộ chuyển đổi GIS chạy trên trình duyệt, lấy **VFM** làm định dạng trung tâm. Ứng dụng kết hợp engine native nhẹ cho VFM/KML/KMZ/GeoJSON/JSON/GeoCBOR với **engine GIS nâng cao tự nạp từ CDN khi cần** cho các định dạng GIS/CAD/database/raster nặng. Người dùng không phải tải hay cài tệp WASM thủ công.
 
 Trang chạy: https://xulytiengviet.github.io/xulyVFM/
 
@@ -97,7 +97,9 @@ Raster → vector và vector → raster yêu cầu phép toán có tham số (po
 
 ## Browser GIS engine
 
-Các định dạng nặng tải **gdal3.js 2.8.1** theo nhu cầu từ jsDelivr. GDAL/PROJ/GEOS/SQLite/GeoTIFF hoạt động bằng WebAssembly trong browser. Mã nguồn xulyVFM được cấp phép MIT; dependency bên thứ ba giữ giấy phép riêng, xem [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Các định dạng nặng dùng **gdal3.js 2.8.1** theo đúng chế độ Script (CDN): ứng dụng tự gọi `initGdalJs({ path, useWorker:false })` khi người dùng chọn một định dạng cần engine nâng cao. Không có nút “Download WASM”, không yêu cầu cài đặt và native formats không kích hoạt engine này. `preconnect`, idle warm-up và Service Worker giúp giảm thời gian chờ và tái sử dụng cache ở những lần sau.
+
+Xem [docs/ENGINE-LOADING.md](docs/ENGINE-LOADING.md). Mã nguồn xulyVFM được cấp phép MIT; dependency bên thứ ba giữ giấy phép riêng, xem [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Development
 
